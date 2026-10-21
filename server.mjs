@@ -44,18 +44,23 @@ function sameOrigin(req){
   return (origin.host.toLowerCase()===actualHost)||(origin.protocol==='https:'&&(origin.host.toLowerCase()===official||origin.host.toLowerCase()===forwarded&&forwarded===official));
  }catch{return false;}
 }
+// The login CSRF token is self-contained: mobile in-app browsers sometimes drop
+// the temporary cookie between displaying the form and submitting it.
 const LOGIN_CSRF_KEY=randomBytes(32);
 function newLoginToken(){
+ const issued=Math.floor(Date.now()/1000).toString(36);
  const nonce=randomBytes(20).toString('hex');
- return nonce+'.'+createHmac('sha256',LOGIN_CSRF_KEY).update(nonce).digest('hex');
+ const payload=issued+'.'+nonce;
+ return payload+'.'+createHmac('sha256',LOGIN_CSRF_KEY).update(payload).digest('hex');
 }
-function validLoginToken(req,submitted){
- const match=String(req.headers.cookie||'').match(/(?:^|;\s*)login_csrf=([0-9a-f]{40}\.[0-9a-f]{64})(?:;|$)/);
- if(!match||typeof submitted!=='string'||submitted!==match[1])return false;
- const [nonce,sig]=submitted.split('.');
- if(!/^[0-9a-f]{40}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(sig))return false;
- const expected=createHmac('sha256',LOGIN_CSRF_KEY).update(nonce).digest('hex');
- return timingSafeEqual(Buffer.from(sig),Buffer.from(expected));
+function validLoginToken(submitted){
+ if(typeof submitted!=='string')return false;
+ const m=/^([0-9a-z]{1,10})\.([0-9a-f]{40})\.([0-9a-f]{64})$/.exec(submitted);
+ if(!m)return false;
+ const issued=parseInt(m[1],36),now=Math.floor(Date.now()/1000);
+ if(!Number.isSafeInteger(issued)||issued>now+60||issued<now-900)return false;
+ const expected=createHmac('sha256',LOGIN_CSRF_KEY).update(m[1]+'.'+m[2]).digest('hex');
+ return timingSafeEqual(Buffer.from(m[3]),Buffer.from(expected));
 }
 async function body(req,max=15*1024*1024){const arr=[];let n=0;for await(const b of req){n+=b.length;if(n>max)throw bad('Request too large',413);arr.push(b);}return Buffer.concat(arr).toString();}
 async function json(req){try{return JSON.parse(await body(req));}catch(e){if(e.status)throw e;throw bad('Invalid JSON');}}
@@ -77,7 +82,7 @@ if(req.method==='GET'&&route==='/login'){
  const msg=reason.has('expired')?'The sign-in page expired. Please try again.':reason.has('invalid')?'Incorrect password. Please try again.':'';
  const page=LOGIN.replace('</form>','<input type="hidden" name="csrf" value="'+token+'"></form>')
    .replace('<p>Private GPT + PiAPI filmmaking workspace</p>','<p>Private GPT + PiAPI filmmaking workspace</p>'+(msg?'<p role="alert">'+msg+'</p>':''));
- res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Set-Cookie':'login_csrf='+token+'; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900'});
+ res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"});
  return res.end(page);
 }
 if(req.method==='POST'&&route==='/auth/login'){
@@ -87,7 +92,8 @@ if(req.method==='POST'&&route==='/auth/login'){
  entry.n++;RATE.set(ip,entry);
  if(entry.n>12)throw bad('Too many login attempts',429);
  const form=new URLSearchParams(await body(req,4096));
- if(!validLoginToken(req,form.get('csrf')))return go(res,'/login?expired=1');
+ if(String(req.headers['sec-fetch-site']||'').toLowerCase()==='cross-site')throw bad('Cross-site sign-in blocked',403);
+ if(!validLoginToken(form.get('csrf')))return go(res,'/login?expired=1');
  const pass=form.get('password')||'';
  if(!checkPassword(pass))return go(res,'/login?invalid=1');
  RATE.delete(ip);
