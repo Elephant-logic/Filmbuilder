@@ -148,8 +148,103 @@ async function upload(input){const {name,mime,base64}=input||{};if(!MIME[mime]||
 async function publish(id){if(!PIAPI)throw bad('PiAPI key not configured');const a=await asset(id);const j=await provider('https://upload.theapi.app/api/ephemeral_resource',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify({file_name:a.name,file_data:a.bytes.toString('base64')})});const url=j?.data?.url;if(!url||!String(url).startsWith('https://'))throw bad('Upload URL missing from PiAPI response',502);return url;}
 function outputMedia(data){const out=[],seen=new Set();function walk(v,k=''){if(!v||out.length>20)return;if(typeof v==='string'){if(v.startsWith('https://')&&(/image|video|url|audio|output/i.test(k)||/\.(mp4|webm|png|webp|jpe?g)(\?|$)/i.test(v))&&!seen.has(v)){seen.add(v);out.push({url:v,type:/video|\.mp4|\.webm/i.test(k+' '+v)?'video':/audio|\.mp3|\.wav/i.test(k+' '+v)?'audio':'image'});}}else if(Array.isArray(v))v.forEach(x=>walk(x,k));else if(typeof v==='object')Object.entries(v).forEach(([k2,x])=>walk(x,k2));}walk(data);return out;}
 async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), shots (array of {title,description,seconds}), ratio, duration, resolution. For image tasks pick an image preset. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
-function task(b,refs){const p=PRESETS.find(x=>x.id===b.preset);if(!p)throw bad('Choose a model');if(p.id==='custom'){const x=b.custom;if(!x||typeof x.model!=='string'||typeof x.task_type!=='string'||!x.input||typeof x.input!=='object')throw bad('Custom JSON needs model, task_type and input');return {model:x.model,task_type:x.task_type,input:x.input};}const prompt=String(b.prompt||'').trim();if(!prompt)throw bad('Enter a production prompt');const ratio=String(b.ratio||'16:9'),duration=Math.max(3,Math.min(30,Number(b.duration)||5)),resolution=String(b.resolution||'720p'),images=refs.filter(x=>x.type==='image').map(x=>x.url),videos=refs.filter(x=>x.type==='video').map(x=>x.url),audio=refs.filter(x=>x.type==='audio').map(x=>x.url),i={prompt};if(p.id.startsWith('seedance')){Object.assign(i,{mode:refs.length?'omni_reference':'text_to_video',aspect_ratio:ratio,duration,resolution});if(images.length)i.image_urls=images;if(videos.length)i.video_urls=videos;if(audio.length)i.audio_urls=audio;if(refs.length)i.auto_upload_assets=true;if(videos.length&&['edit','extend'].includes(b.action)){i.omni_reference_task_type=b.action;i.aspect_ratio='adaptive';if(b.action==='edit')i.duration=-1;}}else if(p.id.startsWith('seedream'))Object.assign(i,{aspect_ratio:ratio,size:b.resolution||'2K',output_format:'png',...(images.length?{image_urls:images}:{})});else if(p.id.startsWith('nano'))Object.assign(i,{aspect_ratio:ratio,resolution:b.resolution||'2K',output_format:'png',...(images.length?{image_urls:images}:{})});else if(p.id==='kling3')Object.assign(i,{aspect_ratio:ratio,version:'3.0',mode:'std',duration,enable_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});else if(p.id==='veo31')Object.assign(i,{aspect_ratio:ratio,resolution,duration:String(duration)+'s',generate_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});else if(p.id==='wan26')Object.assign(i,{aspect_ratio:ratio,resolution,duration,prompt_extend:true});else if(p.id==='luma2')Object.assign(i,{model:'ray-v2',aspect_ratio:ratio,duration,loop:false,...(images.length?{start_image:images[0]}:{})});return {model:p.model,task_type:p.task,input:i};}
-async function generate(b){if(!PIAPI)throw bad('PiAPI key missing');const p=PRESETS.find(x=>x.id===b.preset);if(!p)throw bad('Invalid model');const refs=[];if(p.id!=='custom'){for(const id of (b.attachments||[]).slice(0,8)){const a=await asset(id,false),t=a.mime.split('/')[0];if(p.support.includes(t))refs.push({type:t,url:signedMediaUrl(id,a.name)});}for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){if(!r||typeof r.url!=='string'||!r.url.startsWith('https://'))continue;if(p.support.includes(r.type))refs.push({type:r.type,url:r.url});}}const payload=task(b,refs);const r=await provider('https://api.piapi.ai/api/v1/task',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify(payload)});return {id:r.data?.task_id,status:r.data?.status||'submitted',model:p.name,media:outputMedia(r.data?.output),raw:r.data||{}};}
+function task(b,refs){
+ const p=PRESETS.find(x=>x.id===b.preset);
+ if(!p)throw bad('Choose a valid PiAPI model from the dropdown. Your previous model selection may be outdated.');
+ if(p.id==='custom'){
+  const x=b.custom;
+  if(!x||typeof x.model!=='string'||typeof x.task_type!=='string'||!x.input||typeof x.input!=='object'||Array.isArray(x.input))throw bad('Custom JSON needs model, task_type and input');
+  return {model:x.model,task_type:x.task_type,input:x.input};
+ }
+ const prompt=String(b.prompt||'').trim();
+ if(!prompt)throw bad('Enter a production prompt');
+ const ratio=String(b.ratio||'16:9'),duration=Math.round(Number(b.duration)||5),resolution=String(b.resolution||'720p');
+ const images=refs.filter(x=>x.type==='image').map(x=>x.url);
+ const videos=refs.filter(x=>x.type==='video').map(x=>x.url);
+ const audios=refs.filter(x=>x.type==='audio').map(x=>x.url);
+ const operation=String(b.action||'create');
+ const editing=operation==='edit'||operation==='extend';
+ if(editing && p.id!=='seedance25')throw bad('Edit/Extend existing video currently requires Seedance 2.5. Select Seedance 2.5 on the production board.');
+ if(editing && !videos.length)throw bad('To edit or extend a video, upload an MP4/MOV or provide its hosted HTTPS URL.');
+ if(videos.length && !p.support.includes('video'))throw bad(p.name+' does not support source video references. Select Seedance 2.5.');
+ const input={prompt};
+ if(p.id.startsWith('seedance')){
+  const is25=p.id==='seedance25';
+  const maxDuration=is25?30:15;
+  const validRes=is25?['480p','720p','1080p']:['480p','720p'];
+  if(!validRes.includes(resolution))throw bad(p.name+' accepts '+validRes.join(' or ')+' only.');
+  if(!Number.isFinite(duration)||duration<4||duration>maxDuration)throw bad(p.name+' duration must be 4–'+maxDuration+' seconds.');
+  if(!['16:9','9:16','4:3','3:4','21:9','1:1','adaptive'].includes(ratio))throw bad('Choose a supported aspect ratio for Seedance.');
+  input.mode=refs.length?'omni_reference':'text_to_video';
+  input.aspect_ratio=ratio;
+  input.resolution=resolution;
+  input.duration=duration;
+  if(images.length)input.image_urls=images;
+  if(videos.length)input.video_urls=videos;
+  if(audios.length)input.audio_urls=audios;
+  if(is25){
+   if(images.length>30||videos.length>10||audios.length>10)throw bad('Too many Seedance reference files.');
+   if(editing){
+    input.omni_reference_task_type=operation;
+    input.aspect_ratio='adaptive';
+    if(operation==='edit'){
+     input.duration=-1;
+     if(!/@video1\b/i.test(input.prompt))input.prompt='In @video1, '+input.prompt;
+     if(images.length&&!/@image1\b/i.test(input.prompt))input.prompt+=' Use @image1 as the replacement character appearance reference.';
+    }else if(!/@video1\b/i.test(input.prompt)){
+     input.prompt='Extend @video1 forward. '+input.prompt;
+    }
+   }else if(refs.length){
+    input.omni_reference_task_type='reference';
+   }
+  }else if(editing)throw bad('Seedance 2 Fast cannot use the Edit or Extend operation in this app.');
+ }else if(p.id.startsWith('seedream')){
+  const size=p.id==='seedream5pro'?(resolution==='1K'?'1K':'2K'):(resolution==='3K'?'3K':'2K');
+  Object.assign(input,{aspect_ratio:ratio,size,output_format:'png',...(images.length?{image_urls:images}:{})});
+ }else if(p.id.startsWith('nano')){
+  const size=['1K','2K','4K'].includes(resolution)?resolution:'2K';
+  Object.assign(input,{aspect_ratio:ratio,resolution:size,output_format:'png',...(images.length?{image_urls:images}:{})});
+ }else if(p.id==='kling3'){
+  Object.assign(input,{aspect_ratio:ratio,version:'3.0',mode:'std',duration:Math.min(duration,15),enable_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});
+ }else if(p.id==='veo31'){
+  Object.assign(input,{aspect_ratio:ratio,resolution,duration:String(duration)+'s',generate_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});
+ }else if(p.id==='wan26'){
+  Object.assign(input,{aspect_ratio:ratio,resolution,duration,prompt_extend:true});
+ }else if(p.id==='luma2'){
+  Object.assign(input,{model:'ray-v2',aspect_ratio:ratio,duration,loop:false,...(images.length?{start_image:images[0]}:{})});
+ }
+ return {model:p.model,task_type:p.task,input};
+}
+async function generate(b){
+ if(!PIAPI)throw bad('PiAPI key missing');
+ const p=PRESETS.find(x=>x.id===b.preset);
+ if(!p)throw bad('Invalid model selection. Reopen the production board and select Seedance 2.5.');
+ const refs=[];
+ if(p.id!=='custom'){
+  for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,8)){
+   const a=await asset(id,false),type=a.mime.split('/')[0];
+   if(p.support.includes(type))refs.push({type,url:signedMediaUrl(id,a.name)});
+  }
+  for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){
+   if(!r||typeof r.url!=='string'||!r.url.startsWith('https://'))continue;
+   if(p.support.includes(r.type))refs.push({type:r.type,url:r.url});
+  }
+ }
+ const payload=task(b,refs);
+ let result;
+ try{
+  result=await provider('https://api.piapi.ai/api/v1/task',{
+   method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},
+   body:JSON.stringify(payload)
+  });
+ }catch(err){
+  if(/Invalid input/i.test(String(err.message||''))){
+   throw bad('PiAPI rejected the '+p.name+' request. Check source video is 4–30 seconds (for editing), select Edit existing video, and use 720p. Details: '+String(err.message||'').slice(0,200),422);
+  }
+  throw err;
+ }
+ return {id:result.data?.task_id,status:result.data?.status||'submitted',model:p.name,media:outputMedia(result.data?.output),raw:result.data||{}};
+}
 async function status(id){if(!PIAPI)throw bad('PiAPI key missing');if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw bad('Invalid task id');const r=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(id),{headers:{'X-API-Key':PIAPI}});return {id,status:r.data?.status,media:outputMedia(r.data?.output),error:r.data?.error?.message||'',raw:r.data||{}};}
 const LOGIN='<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Framecraft • Sign in</title><style>body{font:16px system-ui;background:#0c101b;color:#fff;min-height:100vh;display:grid;place-items:center;margin:0}main{background:#1a2234;border:1px solid #384057;padding:32px;border-radius:18px;width:min(380px,85vw)}input,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border-radius:10px;font-size:16px}input{background:#0d1322;color:#fff;border:1px solid #58647d}button{background:#7a9aff;border:0;color:#0a172c;font-weight:bold}p{color:#aebbd1}</style><main><h1>Framecraft Studio</h1><p>Private GPT + PiAPI filmmaking workspace</p><form method="POST" action="/auth/login"><input type="password" name="password" placeholder="Studio password" required><button>Sign in</button></form></main></html>';
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');const route=new URL(req.url||'/', 'http://localhost').pathname;try{
