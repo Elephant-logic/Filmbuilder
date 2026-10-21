@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: filmbuilder-framecraft
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: npm test
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: DEMO_MODE
+        value: "false"
+      - key: APP_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PIAPI_API_KEY
+        sync: false
