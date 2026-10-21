@@ -168,15 +168,18 @@ function syncModel(){
  if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
  if(m?.id==='klingo1edit'){
   $('action').value='edit';
-  if(![5,10].includes(Number($('duration').value)))$('duration').value=10;
+  // Editing a base video inherits the source duration; the field is not sent.
+  $('duration').value=10;
   if(!['720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
   if(!['16:9','9:16','1:1'].includes($('ratio').value))$('ratio').value='16:9';
   if(!$('prompt').value.trim())$('prompt').value='Replace the main person in @video with the entire character shown in @image_1. Keep the original location, background, camera movements, action, timing, and other objects as close as possible.';
  }else if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
+ $('duration').disabled=m?.id==='klingo1edit';
+ $('duration').title=m?.id==='klingo1edit'?'Kling O1 source-video edits keep the length of the uploaded video.':'Generated clip duration in seconds';
  $('audioLabel').textContent=m?.id==='klingo1edit'?'Keep original video audio':'Request generated audio (supported models)';
  const descriptions={
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
-  klingo1edit:'Edit the SAME source video: upload a 3–10 second MP4/MOV with both dimensions 720–2160 pixels at 24–60 fps, plus 1–4 JPG/PNG character images. Uses @video and @image_1. Choose 720p, correct aspect ratio and Edit existing video. PiAPI may still modify the scene; billing for reference edits may differ. Check the confirmation before paying.',
+  klingo1edit:'Experimental PiAPI video editing. Upload a 3–10 second MP4/MOV with each dimension 720–2160 px and 24–60 fps, plus a JPG/PNG character image. Use @video and @image_1. Output follows the uploaded clip length (duration input disabled). Video editing may still be rejected by PiAPI; do not repeatedly pay for identical failed inputs.',
   videoswap:'Face-only replacement on an existing MP4 (not whole body or clothing). Maximum 10 MB, 720p and 600 frames. Use media you have rights/consent to use. Select Create.',
   seedance25:'Seedance reference video editing can reject real or photorealistic virtual faces even when the prompt is harmless. For motion transfer, try Kling Motion Control.'
  };
@@ -234,8 +237,8 @@ async function generate(){
   if(!['16:9','9:16','1:1'].includes($('ratio').value)){
    alert('Kling O1 does not accept Adaptive aspect ratio. Select 16:9 for landscape, 9:16 for portrait or 1:1 for square.');return;
   }
-  if(!['720p','1080p'].includes($('resolution').value)||![5,10].includes(Number($('duration').value))){
-   alert('For Kling O1, select 720p or 1080p and a 5- or 10-second duration.');return;
+  if(!['720p','1080p'].includes($('resolution').value)){
+   alert('For Kling O1, select 720p or 1080p. The source video determines the edit duration.');return;
   }
  }
  if(['videoswap','klingmotion'].includes(choice.id)){
@@ -262,7 +265,7 @@ async function generate(){
  if(!['custom','videoswap'].includes(choice.id)&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
- const o1Price=choice.id==='klingo1edit'?'\nPublished O1 base price for these settings: $'+(Number($('duration').value)===5?($('resolution').value==='720p'?'0.39':'0.52'):($('resolution').value==='720p'?'0.78':'1.04'))+' USD. Reference-video editing may cost differently; check PiAPI billing.':' ';
+ const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':' ';
  const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
