@@ -14,7 +14,7 @@ const end=server.indexOf('async function generate(b)',start);
 if(start<0||end<0)throw Error('Task construction function not found');
 const source=server.slice(start,end);
 const sandbox={
- PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5'},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast'}],
+ PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']}],
  bad:(message)=>new Error(message)
 };
 const task=vm.runInNewContext(source+'; task',sandbox);
