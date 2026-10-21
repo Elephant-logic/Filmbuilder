@@ -174,11 +174,11 @@ function syncModel(){
   // Source-video edits inherit framing; PiAPI must not receive aspect_ratio.
   if(!$('prompt').value.trim())$('prompt').value='Replace the main person in @video with the entire character shown in @image_1. Keep the original location, background, camera movements, action, timing, and other objects as close as possible.';
  }else if(m?.id==='kling3omni'){
-  $('action').value='edit';
+  $('action').value='create';
   if(!['720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
   if(!['16:9','9:16','1:1'].includes($('ratio').value))$('ratio').value='9:16';
   if(Number($('duration').value)<3||Number($('duration').value)>15)$('duration').value=8;
-  if(!$('prompt').value.trim())$('prompt').value='In @video, replace the main person with the full appearance with the character from @image_1. Preserve the source scene, original actions, background, lighting, camera movement and timing as closely as possible. Keep the replacement character consistent.';
+  if(!$('prompt').value.trim())$('prompt').value='Generate a NEW video influenced by the style and motion of @video. Use @image_1 as a character appearance reference. The result may change the background, actions, camera, location and timing.';
  }else if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
  $('ratio').disabled=m?.id==='klingo1edit';
  $('ratio').title=m?.id==='klingo1edit'?'Output framing follows the source video; no aspect ratio is sent.':'Output aspect ratio';
@@ -187,14 +187,14 @@ function syncModel(){
  $('audioLabel').textContent=['klingo1edit','kling3omni'].includes(m?.id)?'Keep original video audio':'Request generated audio (supported models)';
  const descriptions={
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
-  kling3omni:'EXPERIMENTAL: one original MP4/MOV video (3–15s) plus 1–4 replacement-character JPG/PNG/WEBP images. Kling 3.0 Omni uses @video and @image_1 to guide regeneration; it does NOT guarantee unchanged original scenery. Duration and 9:16/16:9 ratio determine the generated clip. Published 720p base rate is $0.10 per second without generated audio; video-reference charges may vary. This workflow has not been tested with paid credits.',
+  kling3omni:'NOT A CHARACTER SWAP. PiAPI describes this as reference-guided generation: upload one MP4/MOV and 1–4 images to influence a NEW video. Your previous output was driven by the character image, not the original scene. Do not use this mode to preserve background, camera, actions and timing. It can cost credits even when the result ignores those details.',
   klingo1edit:'UNVERIFIED EXPERIMENTAL PiAPI video editing. Use a 3–10 second MP4/MOV, plus 1–4 character JPG/PNG images. Uses @video and @image_1. Output framing and duration follow the source (both controls disabled). PiAPI has repeatedly returned 10003 Invalid input for this workflow; do not pay for repeated identical attempts. For original-scene replacement consider Wan Animate Replace from a provider that explicitly supports replacement mode.',
   videoswap:'Face-only replacement on an existing MP4 (not whole body or clothing). Maximum 10 MB, 720p and 600 frames. Use media you have rights/consent to use. Select Create.',
   seedance25:'Seedance reference video editing can reject real or photorealistic virtual faces even when the prompt is harmless. For motion transfer, try Kling Motion Control.'
  };
  $('modelHint').textContent=descriptions[m?.id]||'Check model-specific supported uploads and pricing before generating.';
 }
-async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;if(['create','edit','extend'].includes(r.action))$('action').value=r.action;if(['edit','extend'].includes($('action').value)&&!['klingmotion','videoswap','klingo1edit','kling3omni'].includes($('model').value))$('model').value='seedance25';syncModel();if($('model').value==='kling3omni')$('ratio').value=['16:9','9:16','1:1'].includes(r.ratio)?r.ratio:'9:16';else if(r.ratio&&$('action').value==='create')$('ratio').value=r.ratio;else if($('action').value!=='create')$('ratio').value='adaptive';if(r.duration)$('duration').value=r.duration;if($('model').value==='klingo1edit'&&![5,10].includes(Number($('duration').value)))$('duration').value=10;if(r.resolution)$('resolution').value=r.resolution;if(['edit','extend'].includes($('action').value)&&!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';renderShots(r.shots);state.plan={...r,action:$('action').value,preset:$('model').value};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
+async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;if(['create','edit','extend'].includes(r.action))$('action').value=r.action;if(['edit','extend'].includes($('action').value)&&!['klingmotion','videoswap','klingo1edit'].includes($('model').value))$('model').value='seedance25';syncModel();if($('model').value==='kling3omni')$('ratio').value=['16:9','9:16','1:1'].includes(r.ratio)?r.ratio:'9:16';else if(r.ratio&&$('action').value==='create')$('ratio').value=r.ratio;else if($('action').value!=='create')$('ratio').value='adaptive';if(r.duration)$('duration').value=r.duration;if($('model').value==='klingo1edit'&&![5,10].includes(Number($('duration').value)))$('duration').value=10;if(r.resolution)$('resolution').value=r.resolution;if(['edit','extend'].includes($('action').value)&&!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';renderShots(r.shots);state.plan={...r,action:$('action').value,preset:$('model').value};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
 function classify(url){const s=url.split(/[?#]/)[0].toLowerCase();return /\.(mp4|mov|webm)$/.test(s)?'video':/\.(mp3|wav)$/.test(s)?'audio':'image';}
 async function generate(){
  if(busy)return;
@@ -207,7 +207,7 @@ async function generate(){
  const hasVideo=localVideos.length||hosted.some(x=>x.type==='video');
  if(['edit','extend'].includes(action)){
   if(action==='extend'&&choice.id!=='seedance25'){alert('Select Seedance 2.5 to extend a video.');return;}
-  if(action==='edit'&&!['seedance25','klingo1edit','kling3omni'].includes(choice.id)){alert('Select Seedance 2.5, Kling O1 or Kling 3.0 Omni for existing-video edits.');return;}
+  if(action==='edit'&&!['seedance25','klingo1edit'].includes(choice.id)){alert('Kling 3.0 Omni is reference-guided NEW video generation, not existing-video editing.');return;}
   if(!hasVideo){alert('Upload a source MP4/MOV video before editing.');return;}
   if(choice.id==='seedance25'){
    const known=localVideos.filter(x=>Number.isFinite(x.duration)&&x.duration>0);
@@ -232,7 +232,7 @@ async function generate(){
   const externalImages=hosted.filter(r=>r.type==='image');
   const countVideos=localVideos.length+hosted.filter(r=>r.type==='video').length;
   const countImages=images.length+externalImages.length;
-  if(action!=='edit'){alert('Kling 3.0 Omni requires Edit existing video (video reference).');$('action').value='edit';return;}
+  if(action!=='create'){alert('Kling 3.0 Omni makes a NEW video influenced by references, not a character swap. Select Create.');$('action').value='create';return;}
   if(countVideos!==1||countImages<1||countImages>4){alert('Kling 3.0 Omni requires exactly one source video and 1–4 character images. Remove excess references.');return;}
   if(state.assets.some(a=>a.mime?.startsWith('audio/'))||hosted.some(r=>r.type==='audio')){alert('Kling 3.0 Omni video reference cannot take an extra audio file.');return;}
   if(localVideos.some(a=>!['video/mp4','video/quicktime'].includes(a.mime))){alert('Use an MP4 or MOV source video.');return;}
@@ -286,7 +286,7 @@ async function generate(){
  if(!['custom','videoswap'].includes(choice.id)&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
- const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':choice.id==='kling3omni'?'\nEXPERIMENTAL video reference generation; published 720p base price without generated audio for '+Number($('duration').value)+'s is $'+(Number($('duration').value)*($('resolution').value==='1080p'?0.15:0.1)).toFixed(2)+'. Check actual video reference billing. Full background preservation is NOT guaranteed.':' ';
+ const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':choice.id==='kling3omni'?'\nNOT A CHARACTER SWAP. This generates a NEW video from references and may completely change the source scene. Published 720p base price without generated audio for '+Number($('duration').value)+'s is $'+(Number($('duration').value)*($('resolution').value==='1080p'?0.15:0.1)).toFixed(2)+'. Check actual video reference billing. Full background preservation is NOT guaranteed.':' ';
  const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';

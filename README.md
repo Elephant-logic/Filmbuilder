@@ -70,3 +70,9 @@ Choose **Edit existing video** for this app's generation mode, 720p or 1080p, ap
 
 Public docs: https://app.piapi.ai/docs/kling-api/kling-3-omni-api
 PiAPI's February 26, 2026 article said video-reference input was not yet supported through its API at that time. Its subsequently published API documentation describes video reference inputs, but availability and success for the current PiAPI account **have not been verified with a real paid job**. No automatic paid test or retry is implemented.
+
+
+### Correction — Kling 3.0 Omni is not same-scene character replacement
+The PiAPI docs explicitly say `input.video` is a reference for the generated video's *style/content*. A real result in this app animated the reference character image but did not retain the source scene. The Omni preset is now clearly labelled **Video Reference (Not a Swap)**, uses the **Create** operation, and gives a prominent warning before credit-bearing jobs. GPT guidance no longer suggests it for replacing a whole character inside the exact original video. This is a capability clarification, not a paid-generation fix.
+
+For genuine whole-person replacement inside the existing footage, consider a dedicated **Wan 2.2 Animate Replace** service from fal.ai or Replicate, or **P-Video-Replace** from Runware. Those are separate providers, not supported by the current PiAPI key. Their outputs still need manual assessment.
