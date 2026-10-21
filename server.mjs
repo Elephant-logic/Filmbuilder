@@ -91,7 +91,9 @@ function mediaAllowed(req,id){
  return timingSafeEqual(Buffer.from(sig),Buffer.from(mediaSignature(id,exp)));
 }
 async function streamMedia(req,res,id){
- const meta=await asset(id,false),file=path.join(STORAGE,id+'.bin'),size=(await stat(file)).size;
+ const meta=await asset(id,false),file=path.join(STORAGE,id+'.bin');
+ let size;
+ try{size=(await stat(file)).size;}catch{throw bad('This reference file is no longer available. Please upload it again.',404)}
  const range=String(req.headers.range||'');
  let start=0,end=size-1,code=200;
  if(range){
@@ -158,7 +160,7 @@ if(req.method==='GET'&&route.startsWith('/public-media/')){
  if(!m||!mediaAllowed(req,m[1]))throw bad('Reference link invalid or expired',403);
  const a=await asset(m[1],false);
  if(path.extname(a.name).toLowerCase()!=='.'+m[2])throw bad('Reference link does not match file',403);
- return streamMedia(req,res,m[1]);
+ return await streamMedia(req,res,m[1]);
 }
 if(req.method==='GET'&&route==='/login'){
  const token=newLoginToken();
@@ -186,7 +188,19 @@ if(req.method==='POST'&&route==='/auth/login'){
 if(!authenticated(req)){if(req.method==='GET'&&!route.startsWith('/api/'))return go(res,'/login');return send(res,401,{error:'Sign in first. Set APP_PASSWORD in Render environment.'});}
 if(req.method==='GET'&&route==='/'){const html=await readFile(path.join(ROOT,'public/index.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'"});return res.end(html);}
 if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,piapi:!!PIAPI,demo:DEMO,models:PRESETS});
-if(req.method==='GET'&&route.startsWith('/api/media/'))return streamMedia(req,res,route.split('/').pop());
+if(req.method==='GET'&&route.startsWith('/api/media/'))return await streamMedia(req,res,route.split('/').pop());
+if(req.method==='GET'&&route==='/api/assets/status'){
+ const ids=(new URL(req.url||'/', 'http://localhost').searchParams.get('ids')||'').split(',').filter(Boolean).slice(0,50);
+ const valid=[],missing=[];
+ for(const id of ids){
+  try{
+   await asset(id,false);
+   await stat(path.join(STORAGE,id+'.bin'));
+   valid.push(id);
+  }catch{missing.push(id)}
+ }
+ return send(res,200,{valid,missing});
+}
 if(req.method==='GET'&&route.startsWith('/api/reference/')){const id=route.split('/').pop(),a=await asset(id,false);return send(res,200,{url:signedMediaUrl(id,a.name),expiresInSeconds:21600});}
 if(req.method==='GET'&&route.startsWith('/api/task/'))return send(res,200,await status(route.split('/').pop()));
 if(req.method!=='POST'||!sameOrigin(req))throw bad('Unsupported or cross-origin request',403);
