@@ -60,3 +60,13 @@ PiAPI accepted an O1 reference request but reported task error 10003 (Invalid in
 
 ### O1 source-video request correction
 Official Kling Omni API documentation says **aspect ratio is unsupported for base-video edits** and duration is inherited from the source clip. This app now omits both `aspect_ratio` and `duration` from Kling O1 source-video edit payloads and explicitly specifies `config.service_mode: public`, matching PiAPI's documented example. This only fixes the request format; PiAPI's `10003 Invalid input` response does not specify which validation failed. Editing has not been validated with a successful real paid job and should be considered experimental until PiAPI confirms access and accepted source formats. Do not repeatedly submit failed inputs.
+
+
+### Kling 3.0 Omni video + character reference (experimental)
+
+This separate preset is not the existing "Kling 3.0" model. Select **Kling 3.0 Omni · Video + Character Reference (Experimental)** in the Production board. It uses PiAPI `model: kling`, `task_type: omni_video_generation`, `input.version: 3.0`, `video` (one MP4/MOV source URL), and `images` (1–4 reference image URLs) with `@video` and `@image_1` in the prompt; it keeps original audio when requested with `keep_original_audio`. Audio file uploads and multi-shot arrays are not supported together with video references.
+
+Choose **Edit existing video** for this app's generation mode, 720p or 1080p, appropriate 9:16 / 16:9 / 1:1 aspect ratio, and 3–15 seconds. This preset **regenerates a video guided by a reference**; it is **not a guarantee of replacing a character without changing any pixels of the original environment**. Review the PiAPI cost warning before submitting; it does not charge unless you explicitly confirm and generate.
+
+Public docs: https://app.piapi.ai/docs/kling-api/kling-3-omni-api
+PiAPI's February 26, 2026 article said video-reference input was not yet supported through its API at that time. Its subsequently published API documentation describes video reference inputs, but availability and success for the current PiAPI account **have not been verified with a real paid job**. No automatic paid test or retry is implemented.
