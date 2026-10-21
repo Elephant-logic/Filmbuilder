@@ -178,7 +178,7 @@ function syncModel(){
   if(!['720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
   if(!['16:9','9:16','1:1'].includes($('ratio').value))$('ratio').value='9:16';
   if(Number($('duration').value)<3||Number($('duration').value)>15)$('duration').value=8;
-  if(!$('prompt').value.trim())$('prompt').value='In @video, replace the main person's whole appearance with the character from @image_1. Preserve the source scene, original actions, background, lighting, camera movement and timing as closely as possible. Keep the replacement character consistent.';
+  if(!$('prompt').value.trim())$('prompt').value='In @video, replace the main person with the full appearance with the character from @image_1. Preserve the source scene, original actions, background, lighting, camera movement and timing as closely as possible. Keep the replacement character consistent.';
  }else if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
  $('ratio').disabled=m?.id==='klingo1edit';
  $('ratio').title=m?.id==='klingo1edit'?'Output framing follows the source video; no aspect ratio is sent.':'Output aspect ratio';
