@@ -7,7 +7,15 @@ A responsive, password-protected browser app for creative image/video planning a
 - Upload JPEG, PNG, WEBP, MP4, MOV, MP3 and WAV references, up to 100 MB each using streaming uploads with progress and a video preview. GPT can see small reference images; uploaded video/audio are NOT fully analysed by GPT.
 - Editable production prompt, duration, aspect ratio, resolution, operation, audio toggle.
 - PiAPI job submission, task status polling, finished media previews. Uploaded references are hosted automatically when a generation is submitted: files up to 10 MB in supported formats use PiAPI's free 24-hour temporary hosting **if your PiAPI account has Creator/Pro access**, otherwise Filmbuilder provides a signed Render URL valid for up to 6 hours. Each uploaded file has **Get URL → Copy URL** on the production board. Anyone holding the temporary URL can access the file until it expires. Render fallback files are lost when the service restarts or redeploys.
-- Seedance 2.5, Seedance 2 Fast, Seedream 5 Lite/Pro, Nano Banana 2.1/Pro, Kling 3.0, Veo 3.1 Fast, Wan 2.6, Luma Ray 2, plus custom PiAPI Unified API payloads.
+- Seedance 2.5, Seedance 2 Fast, **Kling O1 existing-video character replacement**, Kling Motion Control, Seedream 5 Lite/Pro, Nano Banana 2.1/Pro, Kling 3.0, Veo 3.1 Fast, Wan 2.6, Luma Ray 2, plus custom PiAPI Unified API payloads.
+
+### Replace an entire character while keeping the original scene (Kling O1)
+1. On Production board select **Kling O1 · Replace Character in Same Video**. The operation switches to **Edit existing video**.
+2. Upload **one 3–10 second MP4/MOV original video** and **1–4 JPG/PNG character references** (each image under 10 MB). Use a clip showing the subject clearly. Uploaded videos are capped at 100 MB by Filmbuilder (provider limit 200 MB).
+3. Use `@video` for the source and `@image_1` for the first replacement image in the prompt. The app adds these tags if omitted. Select **720p** and duration **5 or 10 seconds**.
+4. Optionally check **Keep original video audio**, then read the displayed price warning and confirm before spending credits. Uses PiAPI `model: kling`, `task_type: omni_video_generation`, `input.version: o1` with `video` and `images`.
+
+Kling O1 generates an edited copy; preserving every background pixel is **not guaranteed**. Pricing shown in PiAPI documentation (720p 5s $0.39 / 10s $0.78) is a base reference and video-editing billing may differ. No live paid PiAPI request has been made for this integration.
 - Server-side API keys and private password login. Browser-local chat/job history.
 
 ### Deploy on Render
