@@ -32,7 +32,14 @@ function renderAssets(){
  state.assets.forEach(a=>{
   const x=el('div','asset');
   if(a.mime?.startsWith('video/')){
-   const video=el('video');video.src=a.url;video.controls=true;video.preload='metadata';video.playsInline=true;x.append(video);
+   const video=el('video');video.src=a.url;video.controls=true;video.preload='metadata';video.playsInline=true;
+   video.onloadedmetadata=()=>{
+    if(Number.isFinite(video.duration)&&video.duration>0&&Math.abs((a.duration||0)-video.duration)>.1){
+     a.duration=video.duration;save();
+     details.querySelector('small').textContent=((a.size||0)/(1024*1024)).toFixed(1)+' MB · '+video.duration.toFixed(1)+' sec · Video';
+    }
+   };
+   x.append(video);
   }
   const details=el('div','asset-details');
   details.append(el('span','',a.name));
@@ -75,11 +82,62 @@ async function verifyAssets(){
  $('uploadStatus').textContent=missing.size+' previously uploaded file(s) were lost after a server restart. Please upload them again.';
  return missing.size;
 }
-async function init(){try{const r=await api('/api/config');await verifyAssets();renderAssets();models=r.models||[];$('model').textContent='';models.forEach(m=>{const o=el('option','',m.name);o.value=m.id;$('model').append(o);});$('indicator').textContent=(r.gpt?'● GPT':'○ GPT')+' · '+(r.piapi?'● PiAPI':'○ PiAPI')+(r.demo?' · demo':'');if(state.plan){$('prompt').value=state.plan.prompt||'';$('model').value=state.plan.preset||models[0]?.id;$('ratio').value=state.plan.ratio||'16:9';$('duration').value=state.plan.duration||5;$('resolution').value=state.plan.resolution||'720p';renderShots(state.plan.shots);}syncModel();}catch(e){$('indicator').textContent=e.message;}}
-function syncModel(){const m=models.find(x=>x.id===$('model').value);$('boardBadge').textContent=m?m.type:'Model';$('customWrap').classList.toggle('hide',!m||m.id!=='custom');if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';}
-async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;syncModel();if(r.ratio)$('ratio').value=r.ratio;if(r.duration)$('duration').value=r.duration;if(r.resolution)$('resolution').value=r.resolution;renderShots(r.shots);state.plan={...r};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
+async function init(){try{const r=await api('/api/config');await verifyAssets();renderAssets();models=r.models||[];$('model').textContent='';models.forEach(m=>{const o=el('option','',m.name);o.value=m.id;$('model').append(o);});$('indicator').textContent=(r.gpt?'● GPT':'○ GPT')+' · '+(r.piapi?'● PiAPI':'○ PiAPI')+(r.demo?' · demo':'');if(state.plan){$('prompt').value=state.plan.prompt||'';const chosen=models.find(x=>x.id===state.plan.preset);$('model').value=chosen?chosen.id:(models.find(x=>x.id==='seedance25')?.id||models[0]?.id);$('ratio').value=state.plan.ratio||'16:9';$('duration').value=state.plan.duration||5;$('resolution').value=state.plan.resolution||'720p';if(['create','edit','extend'].includes(state.plan.action))$('action').value=state.plan.action;renderShots(state.plan.shots);}syncModel();}catch(e){$('indicator').textContent=e.message;}}
+function syncModel(){
+ let m=models.find(x=>x.id===$('model').value);
+ if(!m){
+  m=models.find(x=>x.id==='seedance25')||models[0];
+  if(m)$('model').value=m.id;
+ }
+ $('boardBadge').textContent=m?m.type:'Choose model';
+ $('customWrap').classList.toggle('hide',!m||m.id!=='custom');
+ if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';
+ if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
+ if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25'){
+  $('action').value='create';
+ }
+}
+async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;if(['create','edit','extend'].includes(r.action))$('action').value=r.action;if(['edit','extend'].includes($('action').value))$('model').value='seedance25';syncModel();if(r.ratio&&$('action').value==='create')$('ratio').value=r.ratio;else if($('action').value!=='create')$('ratio').value='adaptive';if(r.duration)$('duration').value=r.duration;if(r.resolution)$('resolution').value=r.resolution;if(['edit','extend'].includes($('action').value)&&!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';renderShots(r.shots);state.plan={...r,action:$('action').value,preset:$('model').value};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
 function classify(url){const s=url.split(/[?#]/)[0].toLowerCase();return /\.(mp4|mov|webm)$/.test(s)?'video':/\.(mp3|wav)$/.test(s)?'audio':'image';}
-async function generate(){if(busy)return;let custom=null;try{if($('model').value==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}if(!confirm('Send this generation to PiAPI? This can use real paid credits.'))return;busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';try{const urls=$('references').value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean).map(url=>({url,type:classify(url)}));const removed=await verifyAssets();if(removed)throw Error('Some references expired after the server restarted. Upload them again before spending PiAPI credits.');const r=await api('/api/generate',{preset:$('model').value,prompt:$('prompt').value,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action:$('action').value,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls,custom});if(!r.id)throw Error('Task ID missing; check PiAPI history before retrying to avoid duplicate charges.');state.jobs.unshift(r);save();renderJobs();$('jobsBox').scrollIntoView({behavior:'smooth',block:'nearest'});}catch(e){alert('Generation error: '+e.message);}finally{busy=false;$('generate').disabled=false;$('generate').textContent='▶ Generate with PiAPI';}}
+async function generate(){
+ if(busy)return;
+ if(!models.length){alert('Models are still loading. Refresh Filmbuilder.');return;}
+ let choice=models.find(x=>x.id===$('model').value);
+ if(!choice){$('model').value='seedance25';syncModel();alert('Model selection was outdated. I have selected Seedance 2.5. Review your settings and press Generate again.');return;}
+ const action=$('action').value;
+ const localVideos=state.assets.filter(a=>a.mime?.startsWith('video/'));
+ const hosted=$('references').value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean).map(url=>({url,type:classify(url)}));
+ const hasVideo=localVideos.length||hosted.some(x=>x.type==='video');
+ if(['edit','extend'].includes(action)){
+  if(choice.id!=='seedance25'){alert('Select Seedance 2.5 for editing a source video.');return;}
+  if(!hasVideo){alert('Upload a source MP4/MOV video before editing.');return;}
+  const known=localVideos.filter(x=>Number.isFinite(x.duration)&&x.duration>0);
+  if(known.some(x=>x.duration<4||x.duration>30)){alert('Seedance 2.5 editing needs a source video 4 to 30 seconds long. Trim or choose a different video.');return;}
+  $('ratio').value='adaptive';
+  if(!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
+ }
+ if(hasVideo&&choice.id!=='seedance25'&&choice.id!=='seedance2fast'&&choice.id!=='custom'){
+  alert(choice.name+' does not accept source videos in Filmbuilder. Select Seedance 2.5.');return;
+ }
+ if(choice.id.startsWith('seedance')&&!['480p','720p','1080p'].includes($('resolution').value)){
+  $('resolution').value='720p';
+ }
+ const prompt=$('prompt').value.trim();
+ if(choice.id!=='custom'&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
+ let custom=null;
+ try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
+ const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+'\nResolution: '+$('resolution').value+'\nPiAPI may charge credits.';
+ if(!confirm(confirmation))return;
+ busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
+ try{
+  const removed=await verifyAssets();
+  if(removed)throw Error('Some reference files expired after a server restart. Upload them again before spending credits.');
+  const r=await api('/api/generate',{preset:choice.id,prompt,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls:hosted,custom});
+  if(!r.id)throw Error('Task ID missing. Check PiAPI history before retrying to avoid duplicate charges.');
+  state.jobs.unshift(r);save();renderJobs();$('jobsBox').scrollIntoView({behavior:'smooth',block:'nearest'});
+ }catch(e){alert('Generation error: '+e.message);}
+ finally{busy=false;$('generate').disabled=false;$('generate').textContent='▶ Generate with PiAPI';}
+}
 async function poll(){for(const j of state.jobs.slice(0,8)){if(!j.id||['completed','failed','success','cancelled'].includes(String(j.status).toLowerCase()))continue;try{const r=await api('/api/task/'+encodeURIComponent(j.id));Object.assign(j,r);}catch(e){j.error=e.message;}}save();renderJobs();}
 function uploadOne(file){
  return new Promise((resolve,reject)=>{
