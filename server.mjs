@@ -19,6 +19,7 @@ const PRESETS=[
 {id:'seedance25',name:'Seedance 2.5',type:'video',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},
 {id:'seedance2fast',name:'Seedance 2 Fast',type:'video',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},
 {id:'klingmotion',name:'Kling Motion Control · Full Character',type:'video',model:'kling',task:'motion_control',support:['image','video']},
+{id:'klingo1edit',name:'Kling O1 · Replace Character in Same Video',type:'video',model:'kling',task:'omni_video_generation',support:['image','video']},
 {id:'videoswap',name:'PiAPI Video FaceSwap · Face Only',type:'video',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']},
 {id:'seedream5',name:'Seedream 5 Lite',type:'image',model:'seedream',task:'seedream-5-lite',support:['image']},
 {id:'seedream5pro',name:'Seedream 5 Pro',type:'image',model:'seedream',task:'seedream-5-pro',support:['image']},
@@ -235,7 +236,7 @@ async function hostedReference(id){
  return {url:signedMediaUrl(id,meta.name),host:'render',expiresInSeconds:6*3600};
 }
 function outputMedia(data){const out=[],seen=new Set();function walk(v,k=''){if(!v||out.length>20)return;if(typeof v==='string'){if(v.startsWith('https://')&&(/image|video|url|audio|output/i.test(k)||/\.(mp4|webm|png|webp|jpe?g)(\?|$)/i.test(v))&&!seen.has(v)){seen.add(v);out.push({url:v,type:/video|\.mp4|\.webm/i.test(k+' '+v)?'video':/audio|\.mp3|\.wav/i.test(k+' '+v)?'audio':'image'});}}else if(Array.isArray(v))v.forEach(x=>walk(x,k));else if(typeof v==='object')Object.entries(v).forEach(([k2,x])=>walk(x,k2));}walk(data);return out;}
-async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. For an image and video: choose klingmotion with action create when the user wants full-character motion transfer; choose videoswap with action create only for a face-only replacement in an existing MP4. Video FaceSwap requires an MP4 under 10 MB, no more than 720p or 600 frames. Warn that content policies still apply and do not promise acceptance. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), action (one of create/edit/extend), shots (array of {title,description,seconds}), ratio, duration, resolution. If the user specifically requests Seedance video edits to lighting or appearance, choose preset seedance25, action edit, resolution 720p and ratio adaptive. For video extension choose seedance25 and action extend. Describe reference source video as @video1 and replacement character reference image as @image1, explicitly respecting their requested creative change. Never assert the uploaded video content has been inspected. For image tasks pick an image preset and action create. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
+async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. For an image and video: choose klingo1edit with action edit, 720p resolution and a short source clip when the user wants to replace a whole person/character while preserving the existing scene and camera movement; choose klingmotion with action create for motion transfer to a newly generated scene; choose videoswap with action create only for a face-only replacement in an existing MP4. Kling O1 editing does not guarantee unchanged background details. Video FaceSwap requires an MP4 under 10 MB, no more than 720p or 600 frames. Warn that content policies still apply and do not promise acceptance. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), action (one of create/edit/extend), shots (array of {title,description,seconds}), ratio, duration, resolution. If the user specifically requests Seedance video edits to lighting or appearance, choose preset seedance25, action edit, resolution 720p and ratio adaptive. For video extension choose seedance25 and action extend. For Kling O1 editing, describe the original video as @video and the replacement character reference image as @image_1; for Seedance use @video1 and @image1. Respect the requested creative change. Never assert the uploaded video content has been inspected. For image tasks pick an image preset and action create. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
 function task(b,refs){
  const p=PRESETS.find(x=>x.id===b.preset);
  if(!p)throw bad('Choose a valid PiAPI model from the dropdown. Your previous model selection may be outdated.');
@@ -252,7 +253,8 @@ function task(b,refs){
  const audios=refs.filter(x=>x.type==='audio').map(x=>x.url);
  const operation=String(b.action||'create');
  const editing=operation==='edit'||operation==='extend';
- if(editing && p.id!=='seedance25')throw bad('Edit/Extend existing video currently requires Seedance 2.5. Select Seedance 2.5 on the production board.');
+ if(operation==='extend'&&p.id!=='seedance25')throw bad('Extend video requires Seedance 2.5.');
+ if(operation==='edit'&&!['seedance25','klingo1edit'].includes(p.id))throw bad('Edit existing video requires Seedance 2.5 or Kling O1 Character Replace.');
  if(editing && !videos.length)throw bad('To edit or extend a video, upload an MP4/MOV or provide its hosted HTTPS URL.');
  if(videos.length && !p.support.includes('video'))throw bad(p.name+' does not support source video references. Select Seedance 2.5.');
  if(p.id==='klingmotion'){
@@ -268,6 +270,19 @@ function task(b,refs){
   return {model:p.model,task_type:p.task,input:{
    swap_image:images[0],target_video:videos[0],
    swap_faces_index:'0',target_faces_index:'0'
+  }};
+ }
+ if(p.id==='klingo1edit'){
+  if(operation!=='edit')throw bad('Select Edit existing video for Kling O1 Character Replace.');
+  if(videos.length!==1||images.length<1||images.length>4||audios.length)throw bad('Kling O1 character replacement needs exactly one source video and 1–4 character reference images, with no additional audio file.');
+  if(!['720p','1080p'].includes(resolution))throw bad('Kling O1 supports 720p or 1080p.');
+  if(![5,10].includes(duration))throw bad('Set Kling O1 duration to 5 or 10 seconds to match PiAPI pricing increments.');
+  const instruction=prompt.replace(/@video1\b/gi,'@video').replace(/@image1\b/gi,'@image_1');
+  const referenced=(/@video\b/i.test(instruction)?'':'In @video, ')+instruction+(/@image_1\b/i.test(instruction)?'':' Use @image_1 as the reference for the replacement person.');
+  return {model:p.model,task_type:p.task,input:{
+   version:'o1',video:videos[0],images,
+   prompt:referenced,
+   resolution,duration,keep_original_audio:!!b.audio
   }};
  }
  const input={prompt};
@@ -328,6 +343,14 @@ async function generate(b){
    const a=await asset(id,false),type=a.mime.split('/')[0];
    if(p.id==='videoswap'){
     if(type==='video'&&(a.mime!=='video/mp4'||a.size>10*1024*1024))throw bad('Video FaceSwap requires an MP4 under 10 MB, 720p maximum, and at most 600 frames.',422);
+   }
+   if(p.id==='klingo1edit'){
+    if(type==='image'&&(!['image/jpeg','image/png'].includes(a.mime)||a.size>10*1024*1024))throw bad('Kling O1 reference images must be JPG/PNG and under 10 MB each.',422);
+    if(type==='video'){
+     if(!['video/mp4','video/quicktime'].includes(a.mime)||a.size>200*1024*1024)throw bad('Kling O1 source video must be MP4/MOV under 200 MB.',422);
+     const clipDuration=Number.isFinite(a.duration)?a.duration:await mp4Duration(path.join(STORAGE,id+'.bin')).catch(()=>null);
+     if(Number.isFinite(clipDuration)&&(clipDuration<3||clipDuration>10))throw bad('Kling O1 editing needs a 3–10 second source video. Your clip is '+clipDuration.toFixed(1)+' seconds. Trim it before generating.',422);
+    }
    }
    if(p.id==='seedance25'&&b.action==='edit'&&type==='video'){
     const duration=Number.isFinite(a.duration)?a.duration:await mp4Duration(path.join(STORAGE,id+'.bin')).catch(()=>null);
