@@ -217,7 +217,7 @@ async function generate(){
   if(choice.id==='videoswap'){
    const wrong=localVideos.find(a=>a.mime!=='video/mp4'||a.size>10*1024*1024);
    if(wrong){alert('Video FaceSwap needs an MP4 no bigger than 10 MB, at most 720p and 600 frames. Export a smaller clip first.');return;}
-   if(localVideos.some(a=>Math.max(a.width||0,a.height||0)>1280||Math.min(a.width||0,a.height||0)>720)){
+   if(localVideos.some(a=>(a.width||0)>1280||(a.height||0)>1280||(Math.min(a.width||0,a.height||0)>720))){
     alert('Video FaceSwap supports 720p maximum. Export your video at 720p before submitting.');return;
    }
    const unknown=localVideos.some(a=>!a.width&&!a.height);
@@ -225,7 +225,7 @@ async function generate(){
   }
  }
  const prompt=$('prompt').value.trim();
- if(choice.id!=='custom'&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
+ if(!['custom','videoswap'].includes(choice.id)&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
  const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+'\nPiAPI may charge credits.'+(['videoswap','klingmotion'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
