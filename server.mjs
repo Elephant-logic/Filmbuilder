@@ -32,7 +32,31 @@ function go(res,location,cookie){res.writeHead(303,{'Location':location,'Cache-C
 function checkPassword(value){const a=Buffer.from(value||''),b=Buffer.from(PASSWORD);return !!PASSWORD&&a.length===b.length&&timingSafeEqual(a,b);}
 function session(){const exp=String(Date.now()+7*86400000);const sig=createHmac('sha256',PASSWORD).update(exp).digest('hex');return exp+'.'+sig;}
 function authenticated(req){if(!PASSWORD)return false;const c=(req.headers.cookie||'').match(/(?:^|;\s*)studio=([0-9]+\.[0-9a-f]{64})/);if(!c)return false;const [exp,sig]=c[1].split('.');if(Number(exp)<Date.now())return false;const expected=createHmac('sha256',PASSWORD).update(exp).digest('hex');return timingSafeEqual(Buffer.from(sig),Buffer.from(expected));}
-function sameOrigin(req){if(!req.headers.origin)return true;try{return new URL(req.headers.origin).host===req.headers.host;}catch{return false;}}
+function sameOrigin(req){
+ const site=String(req.headers['sec-fetch-site']||'').toLowerCase();
+ if(site==='cross-site')return false;
+ if(site==='same-origin')return true;
+ if(!req.headers.origin)return true;
+ try{
+  const origin=new URL(req.headers.origin),actualHost=String(req.headers.host||'').toLowerCase();
+  const forwarded=String(req.headers['x-forwarded-host']||'').toLowerCase();
+  const official='filmbuilder-framecraft.onrender.com';
+  return (origin.host.toLowerCase()===actualHost)||(origin.protocol==='https:'&&(origin.host.toLowerCase()===official||origin.host.toLowerCase()===forwarded&&forwarded===official));
+ }catch{return false;}
+}
+const LOGIN_CSRF_KEY=randomBytes(32);
+function newLoginToken(){
+ const nonce=randomBytes(20).toString('hex');
+ return nonce+'.'+createHmac('sha256',LOGIN_CSRF_KEY).update(nonce).digest('hex');
+}
+function validLoginToken(req,submitted){
+ const match=String(req.headers.cookie||'').match(/(?:^|;\s*)login_csrf=([0-9a-f]{40}\.[0-9a-f]{64})(?:;|$)/);
+ if(!match||typeof submitted!=='string'||submitted!==match[1])return false;
+ const [nonce,sig]=submitted.split('.');
+ if(!/^[0-9a-f]{40}$/.test(nonce)||!/^[0-9a-f]{64}$/.test(sig))return false;
+ const expected=createHmac('sha256',LOGIN_CSRF_KEY).update(nonce).digest('hex');
+ return timingSafeEqual(Buffer.from(sig),Buffer.from(expected));
+}
 async function body(req,max=15*1024*1024){const arr=[];let n=0;for await(const b of req){n+=b.length;if(n>max)throw bad('Request too large',413);arr.push(b);}return Buffer.concat(arr).toString();}
 async function json(req){try{return JSON.parse(await body(req));}catch(e){if(e.status)throw e;throw bad('Invalid JSON');}}
 async function provider(url,opts,ms=90000){const ct=new AbortController(),timer=setTimeout(()=>ct.abort(),ms);try{const r=await fetch(url,{...opts,signal:ct.signal});const t=await r.text();let j;try{j=JSON.parse(t)}catch{throw bad('Provider returned a non-JSON response',502)}if(!r.ok||(j.code&&!['200','201'].includes(String(j.code))))throw bad('Provider rejected request: '+String(j.message||j.error?.message||r.status),r.status===401||r.status===403?403:502);return j;}finally{clearTimeout(timer)}}
@@ -47,8 +71,28 @@ async function status(id){if(!PIAPI)throw bad('PiAPI key missing');if(!/^[a-zA-Z
 const LOGIN='<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Framecraft • Sign in</title><style>body{font:16px system-ui;background:#0c101b;color:#fff;min-height:100vh;display:grid;place-items:center;margin:0}main{background:#1a2234;border:1px solid #384057;padding:32px;border-radius:18px;width:min(380px,85vw)}input,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border-radius:10px;font-size:16px}input{background:#0d1322;color:#fff;border:1px solid #58647d}button{background:#7a9aff;border:0;color:#0a172c;font-weight:bold}p{color:#aebbd1}</style><main><h1>Framecraft Studio</h1><p>Private GPT + PiAPI filmmaking workspace</p><form method="POST" action="/auth/login"><input type="password" name="password" placeholder="Studio password" required><button>Sign in</button></form></main></html>';
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');const route=new URL(req.url||'/', 'http://localhost').pathname;try{
 if(req.method==='GET'&&route==='/api/health')return send(res,200,{ok:true,configured:!!PASSWORD});
-if(req.method==='GET'&&route==='/login'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(LOGIN);}
-if(req.method==='POST'&&route==='/auth/login'){if(!sameOrigin(req))throw bad('Cross-origin request',403);const ip=String(req.socket.remoteAddress||'local');const entry=RATE.get(ip)||{n:0,until:Date.now()+900000};if(entry.until<Date.now()){entry.n=0;entry.until=Date.now()+900000;}entry.n++;RATE.set(ip,entry);if(entry.n>12)throw bad('Too many login attempts',429);const pass=new URLSearchParams(await body(req,4096)).get('password')||'';if(!checkPassword(pass))return go(res,'/login?invalid=1');RATE.delete(ip);return go(res,'/','studio='+session()+'; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800');}
+if(req.method==='GET'&&route==='/login'){
+ const token=newLoginToken();
+ const reason=new URL(req.url||'/', 'http://localhost').searchParams;
+ const msg=reason.has('expired')?'The sign-in page expired. Please try again.':reason.has('invalid')?'Incorrect password. Please try again.':'';
+ const page=LOGIN.replace('</form>','<input type="hidden" name="csrf" value="'+token+'"></form>')
+   .replace('<p>Private GPT + PiAPI filmmaking workspace</p>','<p>Private GPT + PiAPI filmmaking workspace</p>'+(msg?'<p role="alert">'+msg+'</p>':''));
+ res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Set-Cookie':'login_csrf='+token+'; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900'});
+ return res.end(page);
+}
+if(req.method==='POST'&&route==='/auth/login'){
+ const ip=String(req.socket.remoteAddress||'local');
+ const entry=RATE.get(ip)||{n:0,until:Date.now()+900000};
+ if(entry.until<Date.now()){entry.n=0;entry.until=Date.now()+900000;}
+ entry.n++;RATE.set(ip,entry);
+ if(entry.n>12)throw bad('Too many login attempts',429);
+ const form=new URLSearchParams(await body(req,4096));
+ if(!validLoginToken(req,form.get('csrf')))return go(res,'/login?expired=1');
+ const pass=form.get('password')||'';
+ if(!checkPassword(pass))return go(res,'/login?invalid=1');
+ RATE.delete(ip);
+ return go(res,'/','studio='+session()+'; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800');
+}
 if(!authenticated(req)){if(req.method==='GET'&&!route.startsWith('/api/'))return go(res,'/login');return send(res,401,{error:'Sign in first. Set APP_PASSWORD in Render environment.'});}
 if(req.method==='GET'&&route==='/'){const html=await readFile(path.join(ROOT,'public/index.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'"});return res.end(html);}
 if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,piapi:!!PIAPI,demo:DEMO,models:PRESETS});
