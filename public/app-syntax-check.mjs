@@ -14,7 +14,7 @@ const end=server.indexOf('async function generate(b)',start);
 if(start<0||end<0)throw Error('Task construction function not found');
 const source=server.slice(start,end);
 const sandbox={
- PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
+ PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'klingo1edit',name:'Kling O1',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
  bad:(message)=>new Error(message)
 };
 const task=vm.runInNewContext(source+'; task',sandbox);
@@ -64,6 +64,27 @@ assert.equal(swap.input.target_faces_index,'0');
 assert.throws(()=>task({preset:'videoswap',action:'create'},sameRefs.slice(0,1)),/face image/);
 assert.throws(()=>task({preset:'klingmotion',prompt:'Animate',action:'create'},sameRefs.slice(1)),/motion-reference video/);
 console.log('Dedicated face-swap and character-motion payload tests passed');
+const o1=task({
+ preset:'klingo1edit',action:'edit',
+ prompt:'Replace the main person with the character in the image, keep the same kitchen.',
+ resolution:'720p',duration:10,audio:true
+},sameRefs);
+assert.equal(o1.model,'kling');
+assert.equal(o1.task_type,'omni_video_generation');
+assert.equal(o1.input.version,'o1');
+assert.equal(o1.input.video,'https://example.com/motion.mp4');
+assert.equal(o1.input.images.length,1);
+assert.equal(o1.input.images[0],'https://example.com/character.webp');
+assert.match(o1.input.prompt,/@video/);
+assert.match(o1.input.prompt,/@image_1/);
+assert.equal(o1.input.keep_original_audio,true);
+assert.equal(o1.input.resolution,'720p');
+assert.equal(o1.input.duration,10);
+assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:8},sameRefs),/5 or 10/);
+assert.throws(()=>task({preset:'klingo1edit',action:'create',prompt:'replace',duration:5},sameRefs),/Edit existing video/);
+assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:5},sameRefs.slice(0,1)),/1–4/);
+assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:5},sameRefs.concat([{type:'video',url:'https://example.com/second.mp4'}])),/exactly one/);
+console.log('Kling O1 same-scene character-replacement payload tests passed');
 
 
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
