@@ -309,6 +309,12 @@ async function generate(b){
  if(p.id!=='custom'){
   for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,8)){
    const a=await asset(id,false),type=a.mime.split('/')[0];
+   if(p.id==='seedance25'&&b.action==='edit'&&type==='video'){
+    const duration=Number.isFinite(a.duration)?a.duration:await mp4Duration(path.join(STORAGE,id+'.bin')).catch(()=>null);
+    if(Number.isFinite(duration)&&(duration<4||duration>30)){
+     throw bad('Source video "'+a.name+'" lasts '+duration.toFixed(1)+' seconds. Seedance 2.5 editing requires 4–30 seconds. Use Samsung Gallery to trim to about 8–12 seconds and upload the new copy.',422);
+    }
+   }
    if(p.support.includes(type)){const hosted=await hostedReference(id);refs.push({type,url:hosted.url});}
   }
   for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){
