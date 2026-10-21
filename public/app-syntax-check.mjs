@@ -14,7 +14,7 @@ const end=server.indexOf('async function generate(b)',start);
 if(start<0||end<0)throw Error('Task construction function not found');
 const source=server.slice(start,end);
 const sandbox={
- PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']}],
+ PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
  bad:(message)=>new Error(message)
 };
 const task=vm.runInNewContext(source+'; task',sandbox);
@@ -44,6 +44,27 @@ assert.throws(()=>task(
  {preset:'invalid',prompt:'Edit',action:'edit'},[]
 ),/valid PiAPI model/);
 console.log('PiAPI task preflight tests passed');
+const sameRefs=[
+ {type:'video',url:'https://example.com/motion.mp4'},
+ {type:'image',url:'https://example.com/character.webp'}
+];
+const motion=task({preset:'klingmotion',prompt:'Animate the illustrated hero using the movements in the reference clip',action:'create',duration:8},sameRefs);
+assert.equal(motion.model,'kling');
+assert.equal(motion.task_type,'motion_control');
+assert.equal(motion.input.image_url,'https://example.com/character.webp');
+assert.equal(motion.input.video_url,'https://example.com/motion.mp4');
+assert.equal(motion.input.version,'2.6');
+assert.equal(motion.input.motion_direction,'video');
+const swap=task({preset:'videoswap',action:'create'},sameRefs);
+assert.equal(swap.model,'Qubico/video-toolkit');
+assert.equal(swap.task_type,'face-swap');
+assert.equal(swap.input.swap_image,'https://example.com/character.webp');
+assert.equal(swap.input.target_video,'https://example.com/motion.mp4');
+assert.equal(swap.input.target_faces_index,'0');
+assert.throws(()=>task({preset:'videoswap',action:'create'},sameRefs.slice(0,1)),/face image/);
+assert.throws(()=>task({preset:'klingmotion',prompt:'Animate',action:'create'},sameRefs.slice(1)),/motion-reference video/);
+console.log('Dedicated face-swap and character-motion payload tests passed');
+
 
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
 if(!videoCode.startsWith('async function mp4Duration'))throw Error('Video duration parser missing');
