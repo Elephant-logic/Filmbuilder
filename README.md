@@ -6,7 +6,7 @@ A responsive, password-protected browser app for creative image/video planning a
 - GPT creative-director chat: prompts, shot lists, visual direction, model recommendations.
 - Upload JPEG, PNG, WEBP, MP4, MOV, MP3 and WAV references, up to 100 MB each using streaming uploads with progress and a video preview. GPT can see small reference images; uploaded video/audio are NOT fully analysed by GPT.
 - Editable production prompt, duration, aspect ratio, resolution, operation, audio toggle.
-- PiAPI job submission, task status polling, finished media previews. Locally uploaded references are delivered to PiAPI using signed, time-limited HTTPS file URLs (6 hours).
+- PiAPI job submission, task status polling, finished media previews. Locally uploaded references are delivered to PiAPI using signed, time-limited HTTPS file URLs (6 hours). Each uploaded file has **Get URL → Copy URL** in the production board. No third-party storage account is needed for temporary links. Anyone holding one of these URLs can view the file until expiry; the file itself disappears if Render's ephemeral instance restarts or redeploys.
 - Seedance 2.5, Seedance 2 Fast, Seedream 5 Lite/Pro, Nano Banana 2.1/Pro, Kling 3.0, Veo 3.1 Fast, Wan 2.6, Luma Ray 2, plus custom PiAPI Unified API payloads.
 - Server-side API keys and private password login. Browser-local chat/job history.
 
