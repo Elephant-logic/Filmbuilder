@@ -112,7 +112,7 @@ assert.equal(omni.input.resolution,'720p');
 assert.equal(omni.input.keep_original_audio,true);
 assert.equal(omni.config.service_mode,'public');
 assert.equal(omni.input.multi_shots,undefined);
-assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs),/NEW/);
+assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8},sameRefs),/NEW/);
 assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs.slice(0,1)),/1–4/);
 assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs.concat([{type:'video',url:'https://example.com/other.mp4'}])),/exactly one/);
 assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:16},sameRefs),/3 and 15/);
