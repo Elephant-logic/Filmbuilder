@@ -46,19 +46,19 @@ assert.throws(()=>task(
 console.log('PiAPI task preflight tests passed');
 const sameRefs=[
  {type:'video',url:'https://example.com/motion.mp4'},
- {type:'image',url:'https://example.com/character.webp'}
+ {type:'image',url:'https://example.com/character.png'}
 ];
 const motion=task({preset:'klingmotion',prompt:'Animate the illustrated hero using the movements in the reference clip',action:'create',duration:8},sameRefs);
 assert.equal(motion.model,'kling');
 assert.equal(motion.task_type,'motion_control');
-assert.equal(motion.input.image_url,'https://example.com/character.webp');
+assert.equal(motion.input.image_url,'https://example.com/character.png');
 assert.equal(motion.input.video_url,'https://example.com/motion.mp4');
 assert.equal(motion.input.version,'2.6');
 assert.equal(motion.input.motion_direction,'video');
 const swap=task({preset:'videoswap',action:'create'},sameRefs);
 assert.equal(swap.model,'Qubico/video-toolkit');
 assert.equal(swap.task_type,'face-swap');
-assert.equal(swap.input.swap_image,'https://example.com/character.webp');
+assert.equal(swap.input.swap_image,'https://example.com/character.png');
 assert.equal(swap.input.target_video,'https://example.com/motion.mp4');
 assert.equal(swap.input.target_faces_index,'0');
 assert.throws(()=>task({preset:'videoswap',action:'create'},sameRefs.slice(0,1)),/face image/);
@@ -74,7 +74,7 @@ assert.equal(o1.task_type,'omni_video_generation');
 assert.equal(o1.input.version,'o1');
 assert.equal(o1.input.video,'https://example.com/motion.mp4');
 assert.equal(o1.input.images.length,1);
-assert.equal(o1.input.images[0],'https://example.com/character.webp');
+assert.equal(o1.input.images[0],'https://example.com/character.png');
 assert.match(o1.input.prompt,/@video/);
 assert.match(o1.input.prompt,/@image_1/);
 assert.equal(o1.input.keep_original_audio,true);
