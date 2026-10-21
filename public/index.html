@@ -51,7 +51,7 @@ function renderAssets(){
   if(a.mime?.startsWith('video/')){
    const video=el('video');video.src=a.url;video.controls=true;video.preload='metadata';video.playsInline=true;
    video.onloadedmetadata=()=>{
-    if(Number.isFinite(video.duration)&&video.duration>0&&Math.abs((a.duration||0)-video.duration)>.1){
+    if(Number.isFinite(video.duration)&&video.duration>0&&(Math.abs((a.duration||0)-video.duration)>.1||!a.width||!a.height)){
      a.duration=Math.round(video.duration*100)/100;
      a.width=video.videoWidth||undefined;
      a.height=video.videoHeight||undefined;
