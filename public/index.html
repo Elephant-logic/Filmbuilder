@@ -18,7 +18,7 @@
 <div class="messages" id="messages"><div class="empty" id="empty"><div style="font-size:50px">✦</div><h2>What will we create?</h2><div>Plan a product campaign, film a cinematic sequence, edit a clip, design a character, or brainstorm image concepts.</div><div class="chips"><button data-idea="Plan a 15-second cinematic fashion advert from my reference photos.">Fashion advert</button><button data-idea="Create an engaging 5-shot storyboard for a product launch.">Product film</button><button data-idea="Help me plan a consistent AI character and visual identity.">Consistent character</button></div></div></div>
 <div class="composer"><div class="composerbox"><textarea id="message" rows="2" placeholder="Describe your image, video, scene or question…"></textarea><button class="primary" id="send">Send ↑</button></div><div class="fine">GPT plans and recommends. You review the production board before spending PiAPI credits.</div></div></main>
 <section class="workspace" id="workspace"><div class="row" id="boardToggle"><h2>Production board</h2><span class="badge" id="boardBadge">Image + Video</span></div>
-<div class="group"><h3>Reference material</h3><label class="upload">＋ Upload photos, MP4/MOV videos or audio (up to 100 MB each)<input id="upload" type="file" multiple accept="image/*,video/*,audio/*,.mp4,.mov"></label><p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p><div class="assets" id="assets"></div><p class="fine">GPT can inspect uploaded images. PiAPI automatically receives temporary Render-hosted video/image links when you generate. Use Get URL to copy a link (valid up to 6 hours). Anyone with that link can view the file; uploads can disappear if Render restarts or redeploys.</p><div class="field"><label>Additional hosted HTTPS reference URLs (one per line)</label><textarea id="references" rows="2" placeholder="https://example.com/reference.mp4"></textarea></div></div>
+<div class="group"><h3>Reference material</h3><label class="upload">＋ Upload photos, MP4/MOV videos or audio (up to 100 MB each)<input id="upload" type="file" multiple accept="image/*,video/*,audio/*,.mp4,.mov"></label><p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p><div class="assets" id="assets"></div><p class="fine">GPT can inspect uploaded images. Filmbuilder automatically hosts references when generating. Tap Get URL to copy a temporary HTTPS link: PiAPI hosting lasts up to 24 hours for eligible small files; otherwise Render links last up to 6 hours and can disappear after restart. Anyone holding a link can access that file.</p><div class="field"><label>Additional hosted HTTPS reference URLs (one per line)</label><textarea id="references" rows="2" placeholder="https://example.com/reference.mp4"></textarea></div></div>
 <div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> Request generated audio (supported models)</label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
 <div class="group"><h3>Storyboard / shot list</h3><div id="shots" class="muted">Ask GPT to create a storyboard.</div></div><div class="group" id="jobsBox"><div class="row"><h3 style="margin:0">Generation queue</h3><button id="refresh" style="background:transparent;color:#abc4ff;border:0">↻ Refresh</button></div><div id="jobs" class="muted">No jobs submitted.</div></div>
 <div class="fine">API keys stay on the server. Uploaded media, chat history and results require your studio login. Chat and jobs are saved only in this browser.</div></section>
@@ -52,13 +52,14 @@ function renderAssets(){
   details.append(el('small','muted',((a.size||0)/(1024*1024)).toFixed(1)+' MB · '+(a.mime?.startsWith('video/')?'Video':'Reference')));
   x.append(details);
   const getLink=el('button','link-btn','Get URL');
-  getLink.title='Create a temporary Render-hosted video or image URL';
+  getLink.title='Create a temporary HTTPS video or image URL for PiAPI';
   getLink.onclick=async()=>{
    getLink.disabled=true;getLink.textContent='Getting URL…';
    let panel=x.querySelector('.asset-link');
    if(!panel){panel=el('div','asset-link');x.append(panel);}
    try{
-    const result=await api('/api/reference/'+encodeURIComponent(a.id));
+    const result=await api('/api/host',{id:a.id});
+    a.hosting={url:result.url,host:result.host,expiresAt:Date.now()+result.expiresInSeconds*1000};save();
     panel.textContent='';
     const field=el('input');
     field.type='text';field.value=result.url;field.readOnly=true;
@@ -81,8 +82,8 @@ function renderAssets(){
      }
     };
     panel.append(copy);
-    panel.append(el('small','','Expires within 6 hours; anyone with the URL can view the file. This file may be lost on a Render restart or deployment.'));
-    getLink.textContent='Refresh URL';
+    panel.append(el('small','',result.host==='piapi'?'PiAPI temporary link: expires within 24 hours. Anyone with the URL can view it.':'Render temporary link: expires within 6 hours and may stop on restart. Anyone with the URL can view it.'));
+    getLink.textContent='Refresh hosted URL';
    }catch(e){
     panel.textContent='Cannot create link: '+e.message;
     getLink.textContent='Try URL again';
