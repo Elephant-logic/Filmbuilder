@@ -145,7 +145,37 @@ async function uploadBinary(req){
  }
 }
 async function upload(input){const {name,mime,base64}=input||{};if(!MIME[mime]||typeof name!=='string'||!name.toLowerCase().endsWith(MIME[mime]))throw bad('Allowed files: JPEG, PNG, WEBP, MP4, MP3, WAV');if(typeof base64!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/.test(base64))throw bad('Invalid file data');const bytes=Buffer.from(base64,'base64');if(!bytes.length||bytes.length>10*1024*1024)throw bad('Maximum 10 MB per upload',413);const id=randomUUID(),m={id,name:name.slice(0,100),mime,size:bytes.length,created:Date.now()};await Promise.all([writeFile(path.join(STORAGE,id+'.bin'),bytes),writeFile(path.join(STORAGE,id+'.json'),JSON.stringify(m))]);return {id,name:m.name,mime,size:m.size,url:'/api/media/'+id};}
-async function publish(id){if(!PIAPI)throw bad('PiAPI key not configured');const a=await asset(id);const j=await provider('https://upload.theapi.app/api/ephemeral_resource',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify({file_name:a.name,file_data:a.bytes.toString('base64')})});const url=j?.data?.url;if(!url||!String(url).startsWith('https://'))throw bad('Upload URL missing from PiAPI response',502);return url;}
+async function publish(id){
+ if(!PIAPI)throw bad('PiAPI key not configured');
+ const a=await asset(id);
+ const j=await provider('https://upload.theapi.app/api/ephemeral_resource',{
+  method:'POST',
+  headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},
+  body:JSON.stringify({file_name:a.name,file_data:a.bytes.toString('base64')})
+ });
+ const url=j?.data?.url;
+ if(!url||!String(url).startsWith('https://'))throw bad('Upload URL missing from PiAPI response',502);
+ return url;
+}
+const HOSTED_CACHE=new Map();
+const HOSTING_ELIGIBLE=/\.(jpg|jpeg|png|webp|mp4|wav|mp3)$/i;
+async function hostedReference(id){
+ const meta=await asset(id,false);
+ if(PIAPI&&meta.size<=10*1024*1024&&HOSTING_ELIGIBLE.test(meta.name)){
+  const existing=HOSTED_CACHE.get(id);
+  if(existing&&existing.until>Date.now()+60000)return {url:existing.url,host:'piapi',expiresInSeconds:Math.floor((existing.until-Date.now())/1000)};
+  try {
+   const url=await publish(id);
+   // Provider deletes files after 24 h; slightly understate link TTL.
+   const until=Date.now()+23*3600*1000;
+   HOSTED_CACHE.set(id,{url,until});
+   return {url,host:'piapi',expiresInSeconds:23*3600};
+  }catch(e){
+   console.warn('Temporary PiAPI upload not available; using Render signed link:',String(e.message||e).slice(0,160));
+  }
+ }
+ return {url:signedMediaUrl(id,meta.name),host:'render',expiresInSeconds:6*3600};
+}
 function outputMedia(data){const out=[],seen=new Set();function walk(v,k=''){if(!v||out.length>20)return;if(typeof v==='string'){if(v.startsWith('https://')&&(/image|video|url|audio|output/i.test(k)||/\.(mp4|webm|png|webp|jpe?g)(\?|$)/i.test(v))&&!seen.has(v)){seen.add(v);out.push({url:v,type:/video|\.mp4|\.webm/i.test(k+' '+v)?'video':/audio|\.mp3|\.wav/i.test(k+' '+v)?'audio':'image'});}}else if(Array.isArray(v))v.forEach(x=>walk(x,k));else if(typeof v==='object')Object.entries(v).forEach(([k2,x])=>walk(x,k2));}walk(data);return out;}
 async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), action (one of create/edit/extend), shots (array of {title,description,seconds}), ratio, duration, resolution. If the user has uploaded a video and asks to replace a character, change a person, restyle a scene or modify that existing clip, choose preset seedance25, action edit, resolution 720p and ratio adaptive. For video extension choose seedance25 and action extend. Describe reference source video as @video1 and replacement character reference image as @image1, explicitly respecting their requested creative change. Never assert the uploaded video content has been inspected. For image tasks pick an image preset and action create. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
 function task(b,refs){
@@ -223,7 +253,7 @@ async function generate(b){
  if(p.id!=='custom'){
   for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,8)){
    const a=await asset(id,false),type=a.mime.split('/')[0];
-   if(p.support.includes(type))refs.push({type,url:signedMediaUrl(id,a.name)});
+   if(p.support.includes(type)){const hosted=await hostedReference(id);refs.push({type,url:hosted.url});}
   }
   for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){
    if(!r||typeof r.url!=='string'||!r.url.startsWith('https://'))continue;
@@ -301,6 +331,7 @@ if(req.method==='GET'&&route.startsWith('/api/task/'))return send(res,200,await 
 if(req.method!=='POST'||!sameOrigin(req))throw bad('Unsupported or cross-origin request',403);
 if(route==='/api/upload')return send(res,200,await upload(await json(req)));
 if(route==='/api/upload-file')return send(res,200,await uploadBinary(req));
+if(route==='/api/host'){const b=await json(req);if(typeof b?.id!=='string')throw bad('Provide an uploaded file ID');return send(res,200,await hostedReference(b.id));}
 if(route==='/api/chat')return send(res,200,await chat(await json(req)));
 if(route==='/api/generate')return send(res,200,await generate(await json(req)));
 return send(res,404,{error:'Not found'});
