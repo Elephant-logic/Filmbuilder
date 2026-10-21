@@ -14,7 +14,7 @@ const end=server.indexOf('async function generate(b)',start);
 if(start<0||end<0)throw Error('Task construction function not found');
 const source=server.slice(start,end);
 const sandbox={
- PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'klingo1edit',name:'Kling O1',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
+ PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'klingo1edit',name:'Kling O1',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'kling3omni',name:'Kling 3.0 Omni',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
  bad:(message)=>new Error(message)
 };
 const task=vm.runInNewContext(source+'; task',sandbox);
@@ -94,6 +94,34 @@ assert.throws(()=>task({preset:'klingo1edit',action:'create',prompt:'replace',du
 assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:5},sameRefs.slice(0,1)),/1–4/);
 assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:5},sameRefs.concat([{type:'video',url:'https://example.com/second.mp4'}])),/exactly one/);
 console.log('Kling O1 same-scene character-replacement payload tests passed');
+const omni=task({
+ preset:'kling3omni',action:'edit',prompt:'Replace the subject in the same room and motion.',
+ ratio:'9:16',duration:8,resolution:'720p',audio:true
+},sameRefs);
+assert.equal(omni.model,'kling');
+assert.equal(omni.task_type,'omni_video_generation');
+assert.equal(omni.input.version,'3.0');
+assert.equal(omni.input.video,'https://example.com/motion.mp4');
+assert.equal(omni.input.images.length,1);
+assert.equal(omni.input.images[0],'https://example.com/character.png');
+assert.match(omni.input.prompt,/@video/);
+assert.match(omni.input.prompt,/@image_1/);
+assert.equal(omni.input.duration,8);
+assert.equal(omni.input.aspect_ratio,'9:16');
+assert.equal(omni.input.resolution,'720p');
+assert.equal(omni.input.keep_original_audio,true);
+assert.equal(omni.config.service_mode,'public');
+assert.equal(omni.input.multi_shots,undefined);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs),/Edit existing video/);
+assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8},sameRefs.slice(0,1)),/1–4/);
+assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8},sameRefs.concat([{type:'video',url:'https://example.com/other.mp4'}])),/exactly one/);
+assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:16},sameRefs),/3 and 15/);
+assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8,ratio:'adaptive'},sameRefs),/aspect ratio/);
+const cleanTags=task({preset:'kling3omni',action:'edit',prompt:'Use @video1 and @image1, keep movement',duration:8,ratio:'9:16'},sameRefs);
+assert.match(cleanTags.input.prompt,/@video\b/);
+assert.match(cleanTags.input.prompt,/@image_1\b/);
+assert.doesNotMatch(cleanTags.input.prompt,/@video1|@image1/);
+console.log('Kling 3.0 Omni multimodal video reference payload tests passed');
 
 
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
