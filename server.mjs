@@ -1,11 +1,14 @@
 import http from 'node:http';
-import { readFile,writeFile,mkdir } from 'node:fs/promises';
+import { readFile,writeFile,mkdir,open,unlink,stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { randomUUID,randomBytes,createHmac,timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const STORAGE=path.join(ROOT,'data');
+const MAX_LOCAL_UPLOAD=100*1024*1024;
+const MEDIA_HOST=(process.env.PUBLIC_BASE_URL||'https://filmbuilder-framecraft.onrender.com').replace(/\/$/,'');
 await mkdir(STORAGE,{recursive:true});
 try { const s=await readFile(path.join(ROOT,'.env'),'utf8');for(const line of s.split(/\r?\n/)){const m=line.match(/^([A-Z_]+)=(.*)$/);if(m&&!process.env[m[1]])process.env[m[1]]=m[2];} } catch{}
 const HOST=process.env.HOST||'0.0.0.0',PORT=Number(process.env.PORT)||3000;
@@ -25,7 +28,7 @@ const PRESETS=[
 {id:'luma2',name:'Luma Ray 2',type:'video',model:'luma',task:'video_generation',support:['image']},
 {id:'custom',name:'Custom Unified API',type:'custom',support:['image','video','audio']}
 ];
-const MIME={'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','video/mp4':'.mp4','audio/mpeg':'.mp3','audio/wav':'.wav'};
+const MIME={'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','video/mp4':'.mp4','video/quicktime':'.mov','audio/mpeg':'.mp3','audio/wav':'.wav'};
 const bad=(msg,status=400)=>Object.assign(new Error(msg),{status});
 function send(res,code,value){res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));}
 function go(res,location,cookie){res.writeHead(303,{'Location':location,'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})});res.end();}
@@ -65,17 +68,93 @@ function validLoginToken(submitted){
 async function body(req,max=15*1024*1024){const arr=[];let n=0;for await(const b of req){n+=b.length;if(n>max)throw bad('Request too large',413);arr.push(b);}return Buffer.concat(arr).toString();}
 async function json(req){try{return JSON.parse(await body(req));}catch(e){if(e.status)throw e;throw bad('Invalid JSON');}}
 async function provider(url,opts,ms=90000){const ct=new AbortController(),timer=setTimeout(()=>ct.abort(),ms);try{const r=await fetch(url,{...opts,signal:ct.signal});const t=await r.text();let j;try{j=JSON.parse(t)}catch{throw bad('Provider returned a non-JSON response',502)}if(!r.ok||(j.code&&!['200','201'].includes(String(j.code))))throw bad('Provider rejected request: '+String(j.message||j.error?.message||r.status),r.status===401||r.status===403?403:502);return j;}finally{clearTimeout(timer)}}
-async function asset(id){if(!/^[0-9a-f-]{36}$/.test(id))throw bad('Invalid attachment ID');let m;try{m=JSON.parse(await readFile(path.join(STORAGE,id+'.json'),'utf8'))}catch{throw bad('Attachment missing',404)}return {...m,bytes:await readFile(path.join(STORAGE,id+'.bin'))};}
+async function asset(id,loadBytes=true){
+ if(!/^[0-9a-f-]{36}$/.test(id))throw bad('Invalid attachment ID');
+ let m;try{m=JSON.parse(await readFile(path.join(STORAGE,id+'.json'),'utf8'))}catch{throw bad('Attachment missing or expired',404)}
+ if(!loadBytes)return m;
+ return {...m,bytes:await readFile(path.join(STORAGE,id+'.bin'))};
+}
+function mediaSignature(id,exp){return createHmac('sha256',PASSWORD).update('media:'+id+':'+exp).digest('hex')}
+function signedMediaUrl(id){
+ if(!PASSWORD)throw bad('Studio login password missing',503);
+ const exp=Math.floor(Date.now()/1000)+6*3600;
+ return MEDIA_HOST+'/public-media/'+id+'?expires='+exp+'&signature='+mediaSignature(id,exp);
+}
+function mediaAllowed(req,id){
+ if(!PASSWORD)return false;
+ const q=new URL(req.url||'/', 'http://localhost').searchParams;
+ const exp=Number(q.get('expires')),sig=q.get('signature')||'';
+ if(!Number.isSafeInteger(exp)||exp<Math.floor(Date.now()/1000)||exp>Math.floor(Date.now()/1000)+6*3600+60)return false;
+ if(!/^[0-9a-f]{64}$/.test(sig))return false;
+ return timingSafeEqual(Buffer.from(sig),Buffer.from(mediaSignature(id,exp)));
+}
+async function streamMedia(req,res,id){
+ const meta=await asset(id,false),file=path.join(STORAGE,id+'.bin'),size=(await stat(file)).size;
+ const range=String(req.headers.range||'');
+ let start=0,end=size-1,code=200;
+ if(range){
+  const m=/^bytes=(\d*)-(\d*)$/.exec(range);
+  if(!m){res.writeHead(416,{'Content-Range':'bytes */'+size});return res.end()}
+  start=m[1]?Number(m[1]):Math.max(0,size-Number(m[2]||0));
+  end=m[2]&&m[1]?Number(m[2]):size-1;
+  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||start>=size){res.writeHead(416,{'Content-Range':'bytes */'+size});return res.end()}
+  end=Math.min(end,size-1);code=206;
+ }
+ const headers={'Content-Type':meta.mime,'Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'private,no-store'};
+ if(code===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+size;
+ res.writeHead(code,headers);
+ const stream=createReadStream(file,{start,end});
+ stream.on('error',()=>res.destroy());
+ stream.pipe(res);
+}
+async function uploadBinary(req){
+ let name;try{name=decodeURIComponent(String(req.headers['x-file-name']||''))}catch{throw bad('Invalid filename')}
+ name=path.basename(name).replace(/[\x00-\x1f]/g,'').slice(0,128);
+ const ext=path.extname(name).toLowerCase();
+ const byExt={'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.mp4':'video/mp4','.mov':'video/quicktime','.mp3':'audio/mpeg','.wav':'audio/wav'};
+ const mime=byExt[ext];
+ if(!mime)throw bad('Supported formats: JPG, PNG, WEBP, MP4, MOV, MP3, WAV');
+ const claimed=Number(req.headers['content-length']);
+ if(Number.isFinite(claimed)&&claimed>MAX_LOCAL_UPLOAD)throw bad('Video or image is over 100 MB. Use a shorter clip or a hosted HTTPS URL.',413);
+ const id=randomUUID(),file=path.join(STORAGE,id+'.bin');
+ let size=0,handle=await open(file,'wx',0o600);
+ try{
+  for await(const chunk of req){
+   if(size+chunk.length>MAX_LOCAL_UPLOAD)throw bad('Maximum file size is 100 MB. Trim/compress your video.',413);
+   let position=0;
+   while(position<chunk.length){
+    const result=await handle.write(chunk,position,chunk.length-position,size+position);
+    if(result.bytesWritten<=0)throw bad('Upload could not be written',500);
+    position+=result.bytesWritten;
+   }
+   size+=chunk.length;
+  }
+  if(!size)throw bad('The selected file is empty');
+  await handle.close();handle=null;
+  const meta={id,name,mime,size,created:Date.now()};
+  await writeFile(path.join(STORAGE,id+'.json'),JSON.stringify(meta),{mode:0o600});
+  return {id,name,mime,size,url:'/api/media/'+id};
+ }catch(e){
+  if(handle)await handle.close().catch(()=>{});
+  await unlink(file).catch(()=>{});
+  throw e;
+ }
+}
 async function upload(input){const {name,mime,base64}=input||{};if(!MIME[mime]||typeof name!=='string'||!name.toLowerCase().endsWith(MIME[mime]))throw bad('Allowed files: JPEG, PNG, WEBP, MP4, MP3, WAV');if(typeof base64!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/.test(base64))throw bad('Invalid file data');const bytes=Buffer.from(base64,'base64');if(!bytes.length||bytes.length>10*1024*1024)throw bad('Maximum 10 MB per upload',413);const id=randomUUID(),m={id,name:name.slice(0,100),mime,size:bytes.length,created:Date.now()};await Promise.all([writeFile(path.join(STORAGE,id+'.bin'),bytes),writeFile(path.join(STORAGE,id+'.json'),JSON.stringify(m))]);return {id,name:m.name,mime,size:m.size,url:'/api/media/'+id};}
 async function publish(id){if(!PIAPI)throw bad('PiAPI key not configured');const a=await asset(id);const j=await provider('https://upload.theapi.app/api/ephemeral_resource',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify({file_name:a.name,file_data:a.bytes.toString('base64')})});const url=j?.data?.url;if(!url||!String(url).startsWith('https://'))throw bad('Upload URL missing from PiAPI response',502);return url;}
 function outputMedia(data){const out=[],seen=new Set();function walk(v,k=''){if(!v||out.length>20)return;if(typeof v==='string'){if(v.startsWith('https://')&&(/image|video|url|audio|output/i.test(k)||/\.(mp4|webm|png|webp|jpe?g)(\?|$)/i.test(v))&&!seen.has(v)){seen.add(v);out.push({url:v,type:/video|\.mp4|\.webm/i.test(k+' '+v)?'video':/audio|\.mp3|\.wav/i.test(k+' '+v)?'audio':'image'});}}else if(Array.isArray(v))v.forEach(x=>walk(x,k));else if(typeof v==='object')Object.entries(v).forEach(([k2,x])=>walk(x,k2));}walk(data);return out;}
 async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id);if(a.mime.startsWith('image/')&&a.size<6*1024*1024)parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+a.bytes.toString('base64'),detail:'low'}});else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), shots (array of {title,description,seconds}), ratio, duration, resolution. For image tasks pick an image preset. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
 function task(b,refs){const p=PRESETS.find(x=>x.id===b.preset);if(!p)throw bad('Choose a model');if(p.id==='custom'){const x=b.custom;if(!x||typeof x.model!=='string'||typeof x.task_type!=='string'||!x.input||typeof x.input!=='object')throw bad('Custom JSON needs model, task_type and input');return {model:x.model,task_type:x.task_type,input:x.input};}const prompt=String(b.prompt||'').trim();if(!prompt)throw bad('Enter a production prompt');const ratio=String(b.ratio||'16:9'),duration=Math.max(3,Math.min(30,Number(b.duration)||5)),resolution=String(b.resolution||'720p'),images=refs.filter(x=>x.type==='image').map(x=>x.url),videos=refs.filter(x=>x.type==='video').map(x=>x.url),audio=refs.filter(x=>x.type==='audio').map(x=>x.url),i={prompt};if(p.id.startsWith('seedance')){Object.assign(i,{mode:refs.length?'omni_reference':'text_to_video',aspect_ratio:ratio,duration,resolution});if(images.length)i.image_urls=images;if(videos.length)i.video_urls=videos;if(audio.length)i.audio_urls=audio;if(refs.length)i.auto_upload_assets=true;if(videos.length&&['edit','extend'].includes(b.action)){i.omni_reference_task_type=b.action;i.aspect_ratio='adaptive';if(b.action==='edit')i.duration=-1;}}else if(p.id.startsWith('seedream'))Object.assign(i,{aspect_ratio:ratio,size:b.resolution||'2K',output_format:'png',...(images.length?{image_urls:images}:{})});else if(p.id.startsWith('nano'))Object.assign(i,{aspect_ratio:ratio,resolution:b.resolution||'2K',output_format:'png',...(images.length?{image_urls:images}:{})});else if(p.id==='kling3')Object.assign(i,{aspect_ratio:ratio,version:'3.0',mode:'std',duration,enable_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});else if(p.id==='veo31')Object.assign(i,{aspect_ratio:ratio,resolution,duration:String(duration)+'s',generate_audio:!!b.audio,...(images.length?{image_url:images[0]}:{})});else if(p.id==='wan26')Object.assign(i,{aspect_ratio:ratio,resolution,duration,prompt_extend:true});else if(p.id==='luma2')Object.assign(i,{model:'ray-v2',aspect_ratio:ratio,duration,loop:false,...(images.length?{start_image:images[0]}:{})});return {model:p.model,task_type:p.task,input:i};}
-async function generate(b){if(!PIAPI)throw bad('PiAPI key missing');const p=PRESETS.find(x=>x.id===b.preset);if(!p)throw bad('Invalid model');const refs=[];if(p.id!=='custom'){for(const id of (b.attachments||[]).slice(0,8)){const a=await asset(id),t=a.mime.split('/')[0];if(p.support.includes(t))refs.push({type:t,url:await publish(id)});}for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){if(!r||typeof r.url!=='string'||!r.url.startsWith('https://'))continue;if(p.support.includes(r.type))refs.push({type:r.type,url:r.url});}}const payload=task(b,refs);const r=await provider('https://api.piapi.ai/api/v1/task',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify(payload)});return {id:r.data?.task_id,status:r.data?.status||'submitted',model:p.name,media:outputMedia(r.data?.output),raw:r.data||{}};}
+async function generate(b){if(!PIAPI)throw bad('PiAPI key missing');const p=PRESETS.find(x=>x.id===b.preset);if(!p)throw bad('Invalid model');const refs=[];if(p.id!=='custom'){for(const id of (b.attachments||[]).slice(0,8)){const a=await asset(id,false),t=a.mime.split('/')[0];if(p.support.includes(t))refs.push({type:t,url:signedMediaUrl(id)});}for(const r of (Array.isArray(b.urls)?b.urls:[]).slice(0,12)){if(!r||typeof r.url!=='string'||!r.url.startsWith('https://'))continue;if(p.support.includes(r.type))refs.push({type:r.type,url:r.url});}}const payload=task(b,refs);const r=await provider('https://api.piapi.ai/api/v1/task',{method:'POST',headers:{'X-API-Key':PIAPI,'Content-Type':'application/json'},body:JSON.stringify(payload)});return {id:r.data?.task_id,status:r.data?.status||'submitted',model:p.name,media:outputMedia(r.data?.output),raw:r.data||{}};}
 async function status(id){if(!PIAPI)throw bad('PiAPI key missing');if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw bad('Invalid task id');const r=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(id),{headers:{'X-API-Key':PIAPI}});return {id,status:r.data?.status,media:outputMedia(r.data?.output),error:r.data?.error?.message||'',raw:r.data||{}};}
 const LOGIN='<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Framecraft • Sign in</title><style>body{font:16px system-ui;background:#0c101b;color:#fff;min-height:100vh;display:grid;place-items:center;margin:0}main{background:#1a2234;border:1px solid #384057;padding:32px;border-radius:18px;width:min(380px,85vw)}input,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border-radius:10px;font-size:16px}input{background:#0d1322;color:#fff;border:1px solid #58647d}button{background:#7a9aff;border:0;color:#0a172c;font-weight:bold}p{color:#aebbd1}</style><main><h1>Framecraft Studio</h1><p>Private GPT + PiAPI filmmaking workspace</p><form method="POST" action="/auth/login"><input type="password" name="password" placeholder="Studio password" required><button>Sign in</button></form></main></html>';
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');const route=new URL(req.url||'/', 'http://localhost').pathname;try{
 if(req.method==='GET'&&route==='/api/health')return send(res,200,{ok:true,configured:!!PASSWORD});
+if(req.method==='GET'&&route.startsWith('/public-media/')){
+ const id=route.slice('/public-media/'.length);
+ if(!/^[0-9a-f-]{36}$/.test(id)||!mediaAllowed(req,id))throw bad('Reference link invalid or expired',403);
+ return streamMedia(req,res,id);
+}
 if(req.method==='GET'&&route==='/login'){
  const token=newLoginToken();
  const reason=new URL(req.url||'/', 'http://localhost').searchParams;
@@ -102,10 +181,12 @@ if(req.method==='POST'&&route==='/auth/login'){
 if(!authenticated(req)){if(req.method==='GET'&&!route.startsWith('/api/'))return go(res,'/login');return send(res,401,{error:'Sign in first. Set APP_PASSWORD in Render environment.'});}
 if(req.method==='GET'&&route==='/'){const html=await readFile(path.join(ROOT,'public/index.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'"});return res.end(html);}
 if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,piapi:!!PIAPI,demo:DEMO,models:PRESETS});
-if(req.method==='GET'&&route.startsWith('/api/media/')){const a=await asset(route.split('/').pop());res.writeHead(200,{'Content-Type':a.mime,'Content-Length':a.size,'Cache-Control':'private,no-store'});return res.end(a.bytes);}
+if(req.method==='GET'&&route.startsWith('/api/media/'))return streamMedia(req,res,route.split('/').pop());
+if(req.method==='GET'&&route.startsWith('/api/reference/')){const id=route.split('/').pop();await asset(id,false);return send(res,200,{url:signedMediaUrl(id),expiresInSeconds:21600});}
 if(req.method==='GET'&&route.startsWith('/api/task/'))return send(res,200,await status(route.split('/').pop()));
 if(req.method!=='POST'||!sameOrigin(req))throw bad('Unsupported or cross-origin request',403);
 if(route==='/api/upload')return send(res,200,await upload(await json(req)));
+if(route==='/api/upload-file')return send(res,200,await uploadBinary(req));
 if(route==='/api/chat')return send(res,200,await chat(await json(req)));
 if(route==='/api/generate')return send(res,200,await generate(await json(req)));
 return send(res,404,{error:'Not found'});
