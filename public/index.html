@@ -19,7 +19,7 @@
 <div class="composer"><div class="composerbox"><textarea id="message" rows="2" placeholder="Describe your image, video, scene or question…"></textarea><button class="primary" id="send">Send ↑</button></div><div class="fine">GPT plans and recommends. You review the production board before spending PiAPI credits.</div></div></main>
 <section class="workspace" id="workspace"><div class="row" id="boardToggle"><h2>Production board</h2><span class="badge" id="boardBadge">Image + Video</span></div>
 <div class="group"><h3>Reference material</h3><label class="upload">＋ Upload photos, MP4/MOV videos or audio (up to 100 MB each)<input id="upload" type="file" multiple accept="image/*,video/*,audio/*,.mp4,.mov"></label><p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p><div class="assets" id="assets"></div><p class="fine warning">Seedance 2.5 editing needs a 4–30 second source video. If yours is longer: Samsung Gallery → open video → pencil/Edit → trim to around 8–12 seconds → Save as copy → upload the trimmed version.</p><p class="fine">GPT can inspect uploaded images. Filmbuilder automatically hosts references when generating. Tap Get URL to copy a temporary HTTPS link: PiAPI hosting lasts up to 24 hours for eligible small files; otherwise Render links last up to 6 hours and can disappear after restart. Anyone holding a link can access that file.</p><div class="field"><label>Additional hosted HTTPS reference URLs (one per line)</label><textarea id="references" rows="2" placeholder="https://example.com/reference.mp4"></textarea></div></div>
-<div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> Request generated audio (supported models)</label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
+<div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> <span id="audioLabel">Request generated audio (supported models)</span></label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
 <div class="group"><h3>Storyboard / shot list</h3><div id="shots" class="muted">Ask GPT to create a storyboard.</div></div><div class="group" id="jobsBox"><div class="row"><h3 style="margin:0">Generation queue</h3><button id="refresh" style="background:transparent;color:#abc4ff;border:0">↻ Refresh</button></div><div id="jobs" class="muted">No jobs submitted.</div></div>
 <div class="fine">API keys stay on the server. Uploaded media, chat history and results require your studio login. Chat and jobs are saved only in this browser.</div></section>
 </div>
@@ -166,15 +166,22 @@ function syncModel(){
  $('customWrap').classList.toggle('hide',!m||m.id!=='custom');
  if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';
  if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
- if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
+ if(m?.id==='klingo1edit'){
+  $('action').value='edit';
+  if(![5,10].includes(Number($('duration').value)))$('duration').value=10;
+  if(!['720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
+  if(!$('prompt').value.trim())$('prompt').value='Replace the main person in @video with the entire character shown in @image_1. Keep the original location, background, camera movements, action, timing, and other objects as close as possible.';
+ }else if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
+ $('audioLabel').textContent=m?.id==='klingo1edit'?'Keep original video audio':'Request generated audio (supported models)';
  const descriptions={
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
+  klingo1edit:'Edit the SAME source video: upload a 3–10 second MP4/MOV plus 1–4 JPG/PNG character images. Uses @video and @image_1. Choose 720p and Edit existing video; Keep original video audio is optional. May alter background details. PiAPI lists $0.39 for 5s or $0.78 for 10s at 720p; source-video pricing may differ. Review confirmation before paying.',
   videoswap:'Face-only replacement on an existing MP4 (not whole body or clothing). Maximum 10 MB, 720p and 600 frames. Use media you have rights/consent to use. Select Create.',
   seedance25:'Seedance reference video editing can reject real or photorealistic virtual faces even when the prompt is harmless. For motion transfer, try Kling Motion Control.'
  };
  $('modelHint').textContent=descriptions[m?.id]||'Check model-specific supported uploads and pricing before generating.';
 }
-async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;if(['create','edit','extend'].includes(r.action))$('action').value=r.action;if(['edit','extend'].includes($('action').value)&&!['klingmotion','videoswap'].includes($('model').value))$('model').value='seedance25';syncModel();if(r.ratio&&$('action').value==='create')$('ratio').value=r.ratio;else if($('action').value!=='create')$('ratio').value='adaptive';if(r.duration)$('duration').value=r.duration;if(r.resolution)$('resolution').value=r.resolution;if(['edit','extend'].includes($('action').value)&&!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';renderShots(r.shots);state.plan={...r,action:$('action').value,preset:$('model').value};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
+async function chat(){const text=$('message').value.trim();if(!text||busy)return;busy=true;$('send').disabled=true;$('message').value='';const history=state.history.map(x=>({...x}));state.history.push({role:'user',content:text});say('user',text);say('assistant','Planning your idea…');const loader=$('messages').lastChild;try{await verifyAssets();const r=await api('/api/chat',{text,history,attachments:state.assets.map(a=>a.id)});const reply=String(r.reply||'Here is your plan.');loader.textContent=reply;state.history.push({role:'assistant',content:reply});if(r.prompt){$('prompt').value=r.prompt;if(models.some(m=>m.id===r.preset))$('model').value=r.preset;if(['create','edit','extend'].includes(r.action))$('action').value=r.action;if(['edit','extend'].includes($('action').value)&&!['klingmotion','videoswap','klingo1edit'].includes($('model').value))$('model').value='seedance25';syncModel();if(r.ratio&&$('action').value==='create')$('ratio').value=r.ratio;else if($('action').value!=='create')$('ratio').value='adaptive';if(r.duration)$('duration').value=r.duration;if($('model').value==='klingo1edit'&&![5,10].includes(Number($('duration').value)))$('duration').value=10;if(r.resolution)$('resolution').value=r.resolution;if(['edit','extend'].includes($('action').value)&&!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';renderShots(r.shots);state.plan={...r,action:$('action').value,preset:$('model').value};}}catch(e){loader.textContent='Error: '+e.message;state.history.push({role:'assistant',content:loader.textContent});}finally{busy=false;$('send').disabled=false;save();$('message').focus();}}
 function classify(url){const s=url.split(/[?#]/)[0].toLowerCase();return /\.(mp4|mov|webm)$/.test(s)?'video':/\.(mp3|wav)$/.test(s)?'audio':'image';}
 async function generate(){
  if(busy)return;
@@ -186,23 +193,44 @@ async function generate(){
  const hosted=$('references').value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean).map(url=>({url,type:classify(url)}));
  const hasVideo=localVideos.length||hosted.some(x=>x.type==='video');
  if(['edit','extend'].includes(action)){
-  if(choice.id!=='seedance25'){alert('Select Seedance 2.5 for editing a source video.');return;}
+  if(action==='extend'&&choice.id!=='seedance25'){alert('Select Seedance 2.5 to extend a video.');return;}
+  if(action==='edit'&&!['seedance25','klingo1edit'].includes(choice.id)){alert('Select Seedance 2.5 or Kling O1 for existing-video edits.');return;}
   if(!hasVideo){alert('Upload a source MP4/MOV video before editing.');return;}
-  const known=localVideos.filter(x=>Number.isFinite(x.duration)&&x.duration>0);
-  const invalid=known.find(x=>x.duration<4||x.duration>30);
-  if(invalid){
-   alert('Your video "'+invalid.name+'" is '+timeLabel(invalid.duration)+' long. Seedance editing accepts 4–30 seconds. '+durationWarning(invalid));
-   $('workspace').classList.remove('collapsed');
-   return;
+  if(choice.id==='seedance25'){
+   const known=localVideos.filter(x=>Number.isFinite(x.duration)&&x.duration>0);
+   const invalid=known.find(x=>x.duration<4||x.duration>30);
+   if(invalid){
+    alert('Your video "'+invalid.name+'" is '+timeLabel(invalid.duration)+' long. Seedance editing accepts 4–30 seconds. '+durationWarning(invalid));
+    $('workspace').classList.remove('collapsed');
+    return;
+   }
+   $('ratio').value='adaptive';
+   if(!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
   }
-  $('ratio').value='adaptive';
-  if(!['480p','720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
  }
- if(hasVideo&&!['seedance25','seedance2fast','klingmotion','videoswap','custom'].includes(choice.id)){
+ if(hasVideo&&!['seedance25','seedance2fast','klingmotion','klingo1edit','videoswap','custom'].includes(choice.id)){
   alert(choice.name+' does not accept source videos. Choose Seedance, Kling Motion Control, or Video FaceSwap.');return;
  }
  if(choice.id.startsWith('seedance')&&!['480p','720p','1080p'].includes($('resolution').value)){
   $('resolution').value='720p';
+ }
+ if(choice.id==='klingo1edit'){
+  const images=state.assets.filter(a=>a.mime?.startsWith('image/'));
+  const externalImages=hosted.filter(r=>r.type==='image');
+  const videoCount=localVideos.length+hosted.filter(r=>r.type==='video').length;
+  if(action!=='edit'){alert('Kling O1 character replacement requires Edit existing video.');$('action').value='edit';return;}
+  if(videoCount!==1||images.length+externalImages.length<1||images.length+externalImages.length>4){
+   alert('Kling O1 needs exactly 1 original video and 1–4 replacement-character JPG/PNG images.');return;
+  }
+  const wrongImage=images.find(a=>!['image/jpeg','image/png'].includes(a.mime)||a.size>10*1024*1024);
+  if(wrongImage){alert('Kling O1 images must be JPG or PNG, each under 10 MB.');return;}
+  const wrongVideo=localVideos.find(a=>!['video/mp4','video/quicktime'].includes(a.mime)||a.size>200*1024*1024);
+  if(wrongVideo){alert('Use a 3–10 second MP4 or MOV for Kling O1.');return;}
+  const invalidVideo=localVideos.find(a=>Number.isFinite(a.duration)&&a.duration>0&&(a.duration<3||a.duration>10));
+  if(invalidVideo){alert('Kling O1 accepts 3–10 seconds. "'+invalidVideo.name+'" is '+timeLabel(invalidVideo.duration)+'. Trim it before submitting.');return;}
+  if(!['720p','1080p'].includes($('resolution').value)||![5,10].includes(Number($('duration').value))){
+   alert('For Kling O1, select 720p or 1080p and a 5- or 10-second duration.');return;
+  }
  }
  if(['videoswap','klingmotion'].includes(choice.id)){
   const images=state.assets.filter(a=>a.mime?.startsWith('image/'));
@@ -228,7 +256,8 @@ async function generate(){
  if(!['custom','videoswap'].includes(choice.id)&&!prompt){alert('Ask GPT to create a prompt or enter one in the Production board.');return;}
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
- const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+'\nPiAPI may charge credits.'+(['videoswap','klingmotion'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
+ const o1Price=choice.id==='klingo1edit'?'\nPublished O1 base price for these settings: $'+(Number($('duration').value)===5?($('resolution').value==='720p'?'0.39':'0.52'):($('resolution').value==='720p'?'0.78':'1.04'))+' USD. Reference-video editing may cost differently; check PiAPI billing.':' ';
+ const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
  try{
@@ -279,7 +308,7 @@ async function uploads(files){
   }
  }
 }
-$('send').onclick=chat;$('message').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chat();}};$('model').onchange=syncModel;$('generate').onclick=generate;$('upload').onchange=e=>{uploads([...e.target.files]);e.target.value='';};$('refresh').onclick=poll;
+$('send').onclick=chat;$('message').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chat();}};$('model').onchange=syncModel;$('action').onchange=syncModel;$('generate').onclick=generate;$('upload').onchange=e=>{uploads([...e.target.files]);e.target.value='';};$('refresh').onclick=poll;
 $('newChat').onclick=()=>{if(!confirm('Start a fresh project in this browser?'))return;state.history=[];state.plan=null;$('prompt').value='';renderChat();renderShots([]);save();};
 $('jumpBoard').onclick=()=>$('workspace').scrollIntoView();$('jumpJobs').onclick=()=>$('jobsBox').scrollIntoView();$('boardToggle').onclick=()=>{$('workspace').classList.toggle('collapsed');};
 document.querySelectorAll('[data-idea]').forEach(b=>b.onclick=()=>{$('message').value=b.dataset.idea;chat();});
