@@ -4,9 +4,9 @@ A responsive, password-protected browser app for creative image/video planning a
 
 ### What works
 - GPT creative-director chat: prompts, shot lists, visual direction, model recommendations.
-- Upload JPEG, PNG, WEBP, MP4, MP3 and WAV references (10 MB max each). GPT can see reference images; uploaded video/audio are NOT fully analysed by GPT.
+- Upload JPEG, PNG, WEBP, MP4, MOV, MP3 and WAV references, up to 100 MB each using streaming uploads with progress and a video preview. GPT can see small reference images; uploaded video/audio are NOT fully analysed by GPT.
 - Editable production prompt, duration, aspect ratio, resolution, operation, audio toggle.
-- PiAPI job submission, task status polling, finished media previews.
+- PiAPI job submission, task status polling, finished media previews. Locally uploaded references are delivered to PiAPI using signed, time-limited HTTPS file URLs (6 hours).
 - Seedance 2.5, Seedance 2 Fast, Seedream 5 Lite/Pro, Nano Banana 2.1/Pro, Kling 3.0, Veo 3.1 Fast, Wan 2.6, Luma Ray 2, plus custom PiAPI Unified API payloads.
 - Server-side API keys and private password login. Browser-local chat/job history.
 
@@ -32,7 +32,7 @@ Requirements: Node 20+. Add a `.env` file in the repository root (excluded by .g
 ### Known limitations
 This is an **MVP**, not a production-tested application. Provider formats are based on public docs but no paid PiAPI generation or OpenAI request has been verified with your keys. Try an inexpensive job for each model first. Model options and prices can change. **Custom mode** accepts a validated JSON envelope, but needs you to supply each model's correct task schema and hosted references. Some models only support a subset of the shared controls, so the API may reject incompatible settings.
 
-Video/audio uploads are available for PiAPI reference workflows, but GPT does not receive a full video analysis. The 10 MB temporary uploader may require a qualifying paid PiAPI tier; media URLs may expire. Render's file system is ephemeral: local uploads vanish on restart/redeploy and browser history alone cannot restore them. Generated media URLs can expire, so save the originals. For a long-term version, use private object storage and a database.
+Video/audio uploads are available for PiAPI reference workflows, but GPT does not receive a full video analysis. PiAPI's standalone ephemeral upload helper remains limited to 10 MB and some plans, so Filmbuilder now serves reference files through signed, six-hour HTTPS URLs instead. Individual PiAPI models have their own input video duration, format, resolution and size restrictions; a 100 MB local upload may still be too large for a particular model (e.g. PiAPI FaceSwap is capped at 10 MB and 720p). For Seedance 2.5 edits, supply a 4–30 second MP4/MOV source video. The Render instance must remain reachable long enough for PiAPI to fetch the signed file; Render free instances may sleep, and local uploads are lost on redeploy/restart. Re-upload after redeploy if a reference is missing. Render's file system is ephemeral: local uploads vanish on restart/redeploy and browser history alone cannot restore them. Generated media URLs can expire, so save the originals. For a long-term version, use private object storage and a database.
 
 ### API docs
 - PiAPI Unified API: https://piapi.ai/docs/unified-api-schema
