@@ -170,12 +170,13 @@ function syncModel(){
   $('action').value='edit';
   if(![5,10].includes(Number($('duration').value)))$('duration').value=10;
   if(!['720p','1080p'].includes($('resolution').value))$('resolution').value='720p';
+  if(!['16:9','9:16','1:1'].includes($('ratio').value))$('ratio').value='16:9';
   if(!$('prompt').value.trim())$('prompt').value='Replace the main person in @video with the entire character shown in @image_1. Keep the original location, background, camera movements, action, timing, and other objects as close as possible.';
  }else if(['edit','extend'].includes($('action').value)&&m?.id!=='seedance25')$('action').value='create';
  $('audioLabel').textContent=m?.id==='klingo1edit'?'Keep original video audio':'Request generated audio (supported models)';
  const descriptions={
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
-  klingo1edit:'Edit the SAME source video: upload a 3–10 second MP4/MOV plus 1–4 JPG/PNG character images. Uses @video and @image_1. Choose 720p and Edit existing video; Keep original video audio is optional. May alter background details. PiAPI lists $0.39 for 5s or $0.78 for 10s at 720p; source-video pricing may differ. Review confirmation before paying.',
+  klingo1edit:'Edit the SAME source video: upload a 3–10 second MP4/MOV with both dimensions 720–2160 pixels at 24–60 fps, plus 1–4 JPG/PNG character images. Uses @video and @image_1. Choose 720p, correct aspect ratio and Edit existing video. PiAPI may still modify the scene; billing for reference edits may differ. Check the confirmation before paying.',
   videoswap:'Face-only replacement on an existing MP4 (not whole body or clothing). Maximum 10 MB, 720p and 600 frames. Use media you have rights/consent to use. Select Create.',
   seedance25:'Seedance reference video editing can reject real or photorealistic virtual faces even when the prompt is harmless. For motion transfer, try Kling Motion Control.'
  };
@@ -224,10 +225,15 @@ async function generate(){
   }
   const wrongImage=images.find(a=>!['image/jpeg','image/png'].includes(a.mime)||a.size>10*1024*1024);
   if(wrongImage){alert('Kling O1 images must be JPG or PNG, each under 10 MB.');return;}
-  const wrongVideo=localVideos.find(a=>!['video/mp4','video/quicktime'].includes(a.mime)||a.size>200*1024*1024);
+  const wrongVideo=localVideos.find(a=>!['video/mp4','video/quicktime'].includes(a.mime)||a.size>100*1024*1024);
   if(wrongVideo){alert('Use a 3–10 second MP4 or MOV for Kling O1.');return;}
   const invalidVideo=localVideos.find(a=>Number.isFinite(a.duration)&&a.duration>0&&(a.duration<3||a.duration>10));
   if(invalidVideo){alert('Kling O1 accepts 3–10 seconds. "'+invalidVideo.name+'" is '+timeLabel(invalidVideo.duration)+'. Trim it before submitting.');return;}
+  const lowRes=localVideos.find(a=>a.width&&a.height&&(a.width<720||a.height<720||a.width>2160||a.height>2160));
+  if(lowRes){alert('Kling O1 needs video width and height between 720 and 2160 pixels. "'+lowRes.name+'" is '+lowRes.width+'×'+lowRes.height+'. Export an HD clip before spending credits.');return;}
+  if(!['16:9','9:16','1:1'].includes($('ratio').value)){
+   alert('Kling O1 does not accept Adaptive aspect ratio. Select 16:9 for landscape, 9:16 for portrait or 1:1 for square.');return;
+  }
   if(!['720p','1080p'].includes($('resolution').value)||![5,10].includes(Number($('duration').value))){
    alert('For Kling O1, select 720p or 1080p and a 5- or 10-second duration.');return;
   }

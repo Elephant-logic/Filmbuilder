@@ -276,13 +276,14 @@ function task(b,refs){
   if(operation!=='edit')throw bad('Select Edit existing video for Kling O1 Character Replace.');
   if(videos.length!==1||images.length<1||images.length>4||audios.length)throw bad('Kling O1 character replacement needs exactly one source video and 1–4 character reference images, with no additional audio file.');
   if(!['720p','1080p'].includes(resolution))throw bad('Kling O1 supports 720p or 1080p.');
+  if(!['16:9','9:16','1:1'].includes(ratio))throw bad('Kling O1 aspect ratio must be 16:9, 9:16 or 1:1 (not adaptive).');
   if(![5,10].includes(duration))throw bad('Set Kling O1 duration to 5 or 10 seconds to match PiAPI pricing increments.');
   const instruction=prompt.replace(/@video1\b/gi,'@video').replace(/@image1\b/gi,'@image_1');
   const referenced=(/@video\b/i.test(instruction)?'':'In @video, ')+instruction+(/@image_1\b/i.test(instruction)?'':' Use @image_1 as the reference for the replacement person.');
   return {model:p.model,task_type:p.task,input:{
    version:'o1',video:videos[0],images,
    prompt:referenced,
-   resolution,duration,keep_original_audio:!!b.audio
+   resolution,duration,aspect_ratio:ratio,keep_original_audio:!!b.audio
   }};
  }
  const input={prompt};
@@ -350,6 +351,7 @@ async function generate(b){
      if(!['video/mp4','video/quicktime'].includes(a.mime)||a.size>200*1024*1024)throw bad('Kling O1 source video must be MP4/MOV under 200 MB.',422);
      const clipDuration=Number.isFinite(a.duration)?a.duration:await mp4Duration(path.join(STORAGE,id+'.bin')).catch(()=>null);
      if(Number.isFinite(clipDuration)&&(clipDuration<3||clipDuration>10))throw bad('Kling O1 editing needs a 3–10 second source video. Your clip is '+clipDuration.toFixed(1)+' seconds. Trim it before generating.',422);
+     if(a.width&&a.height&&(a.width<720||a.height<720||a.width>2160||a.height>2160))throw bad('Kling O1 needs video width and height between 720 and 2160 pixels; this clip is '+a.width+'×'+a.height+'. Export an HD clip (720p or 1080p).',422);
     }
    }
    if(p.id==='seedance25'&&b.action==='edit'&&type==='video'){
@@ -374,7 +376,10 @@ async function generate(b){
   });
  }catch(err){
   if(/Invalid input/i.test(String(err.message||''))){
-   throw bad('PiAPI rejected the '+p.name+' request. Check source video is 4–30 seconds (for editing), select Edit existing video, and use 720p. Details: '+String(err.message||'').slice(0,200),422);
+   if(p.id==='klingo1edit'){
+    throw bad('PiAPI declined Kling O1 editing (Invalid input). The app now sends the documented aspect_ratio, version, video and image references. Check that the video is 3–10 seconds, 720–2160 px in both dimensions, 24–60 fps, and playable from its temporary link; reference photos must be JPG/PNG. This is a provider validation failure, not proof the prompt is wrong. No automatic retry was made.',422);
+   }
+   throw bad('PiAPI rejected the '+p.name+' request. '+(p.id==='seedance25'?'Check the source video is 4–30 seconds and choose 720p. ':'')+'Details: '+String(err.message||'').slice(0,200),422);
   }
   throw err;
  }

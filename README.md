@@ -12,7 +12,7 @@ A responsive, password-protected browser app for creative image/video planning a
 ### Replace an entire character while keeping the original scene (Kling O1)
 1. On Production board select **Kling O1 · Replace Character in Same Video**. The operation switches to **Edit existing video**.
 2. Upload **one 3–10 second MP4/MOV original video** and **1–4 JPG/PNG character references** (each image under 10 MB). Use a clip showing the subject clearly. Uploaded videos are capped at 100 MB by Filmbuilder (provider limit 200 MB).
-3. Use `@video` for the source and `@image_1` for the first replacement image in the prompt. The app adds these tags if omitted. Select **720p** and duration **5 or 10 seconds**.
+3. Use `@video` for the source and `@image_1` for the first replacement image in the prompt. The app adds these tags if omitted. Select **720p**, duration **5 or 10 seconds**, and **16:9, 9:16 or 1:1** to match your source. The app now explicitly sends PiAPI's documented `aspect_ratio` field. Source clips must be 3–10 seconds, MP4/MOV, 720–2160 pixels in both dimensions and 24–60 fps. Local clip dimension checks prevent obvious invalid inputs before PiAPI is contacted.
 4. Optionally check **Keep original video audio**, then read the displayed price warning and confirm before spending credits. Uses PiAPI `model: kling`, `task_type: omni_video_generation`, `input.version: o1` with `video` and `images`.
 
 Kling O1 generates an edited copy; preserving every background pixel is **not guaranteed**. Pricing shown in PiAPI documentation (720p 5s $0.39 / 10s $0.78) is a base reference and video-editing billing may differ. No live paid PiAPI request has been made for this integration.
@@ -52,3 +52,5 @@ OpenAI API billing is separate from ChatGPT Plus. PiAPI charges separately.
 
 ### Security
 A signed, HTTP-only, Secure cookie protects the owner session; keys are only used server-side. This is for one trusted owner, not a multi-user SaaS. Change APP_PASSWORD in Render if anyone else knows it. For serious use, add cloud file storage, upload scanning, detailed costs/quotas, and stronger authentication.
+
+**Troubleshooting:** If PiAPI returns `Invalid input` for Kling O1, the app now reports Kling-specific restrictions rather than Seedance's 4–30s warning. This patch is validated with mocked request unit tests but not a paid request to PiAPI. Check input file accessibility/format and provider status before retrying; do not retry automatically.
