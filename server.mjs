@@ -19,7 +19,7 @@ const PRESETS=[
 {id:'seedance25',name:'Seedance 2.5',type:'video',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},
 {id:'seedance2fast',name:'Seedance 2 Fast',type:'video',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},
 {id:'klingmotion',name:'Kling Motion Control · Full Character',type:'video',model:'kling',task:'motion_control',support:['image','video']},
-{id:'klingo1edit',name:'Kling O1 · Replace Character in Same Video',type:'video',model:'kling',task:'omni_video_generation',support:['image','video']},
+{id:'klingo1edit',name:'Kling O1 · Character Edit (Experimental)',type:'video',model:'kling',task:'omni_video_generation',support:['image','video']},
 {id:'videoswap',name:'PiAPI Video FaceSwap · Face Only',type:'video',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']},
 {id:'seedream5',name:'Seedream 5 Lite',type:'image',model:'seedream',task:'seedream-5-lite',support:['image']},
 {id:'seedream5pro',name:'Seedream 5 Pro',type:'image',model:'seedream',task:'seedream-5-pro',support:['image']},
@@ -279,7 +279,7 @@ function task(b,refs){
   if(operation!=='edit')throw bad('Select Edit existing video for Kling O1 Character Replace.');
   if(videos.length!==1||images.length<1||images.length>4||audios.length)throw bad('Kling O1 character replacement needs exactly one source video and 1–4 character reference images, with no additional audio file.');
   if(!['720p','1080p'].includes(resolution))throw bad('Kling O1 supports 720p or 1080p.');
-  if(!['16:9','9:16','1:1'].includes(ratio))throw bad('Kling O1 aspect ratio must be 16:9, 9:16 or 1:1 (not adaptive).');
+  // Upstream Kling O1 rejects an explicit aspect_ratio for base-video editing. PiAPI may enforce additional rules.
   // Video editing follows the uploaded source's duration. Do not send `duration`
   // for a base-video edit (Kling's official API rejects it in that mode).
   const instruction=prompt.replace(/@video1\b/gi,'@video').replace(/@image1\b/gi,'@image_1');
@@ -287,8 +287,8 @@ function task(b,refs){
   return {model:p.model,task_type:p.task,input:{
    version:'o1',video:videos[0],images,
    prompt:referenced,
-   resolution,aspect_ratio:ratio,keep_original_audio:!!b.audio
-  }};
+   resolution,keep_original_audio:!!b.audio
+  },config:{service_mode:'public'}};
  }
  const input={prompt};
  if(p.id.startsWith('seedance')){
@@ -381,7 +381,7 @@ async function generate(b){
  }catch(err){
   if(/Invalid input/i.test(String(err.message||''))){
    if(p.id==='klingo1edit'){
-    throw bad('PiAPI refused Kling O1 editing (Invalid input). The app uses original-video editing syntax (no forced duration) and supports provider HEAD media checks. The remaining cause may be an inaccessible/unsupported source clip or PiAPI not accepting reference-video editing for this account. Do not repeatedly submit the same inputs; PiAPI charges when generation succeeds. No automatic retry was made.',422);
+    throw bad('PiAPI rejected Kling O1 video editing with error 10003 (Invalid input). The app now omits output duration and aspect ratio for source-video edits and requests public service mode. Since PiAPI did not return a field-specific explanation, compatibility or your reference video URL may still be the issue. Stop retrying until PiAPI support confirms O1 video-edit access for your account. No automatic retry was made.',422);
    }
    throw bad('PiAPI rejected the '+p.name+' request. '+(p.id==='seedance25'?'Check the source video is 4–30 seconds and choose 720p. ':'')+'Details: '+String(err.message||'').slice(0,200),422);
   }
