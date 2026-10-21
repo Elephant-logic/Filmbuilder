@@ -110,6 +110,9 @@ async function streamMedia(req,res,id){
  const headers={'Content-Type':meta.mime,'Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'private,no-store'};
  if(code===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+size;
  res.writeHead(code,headers);
+ // Media providers often check a URL with HEAD before fetching it with GET.
+ // Preserve the signed-link check in the route; send headers without body.
+ if(req.method==='HEAD')return res.end();
  const stream=createReadStream(file,{start,end});
  stream.on('error',()=>res.destroy());
  stream.pipe(res);
@@ -277,13 +280,14 @@ function task(b,refs){
   if(videos.length!==1||images.length<1||images.length>4||audios.length)throw bad('Kling O1 character replacement needs exactly one source video and 1–4 character reference images, with no additional audio file.');
   if(!['720p','1080p'].includes(resolution))throw bad('Kling O1 supports 720p or 1080p.');
   if(!['16:9','9:16','1:1'].includes(ratio))throw bad('Kling O1 aspect ratio must be 16:9, 9:16 or 1:1 (not adaptive).');
-  if(![5,10].includes(duration))throw bad('Set Kling O1 duration to 5 or 10 seconds to match PiAPI pricing increments.');
+  // Video editing follows the uploaded source's duration. Do not send `duration`
+  // for a base-video edit (Kling's official API rejects it in that mode).
   const instruction=prompt.replace(/@video1\b/gi,'@video').replace(/@image1\b/gi,'@image_1');
   const referenced=(/@video\b/i.test(instruction)?'':'In @video, ')+instruction+(/@image_1\b/i.test(instruction)?'':' Use @image_1 as the reference for the replacement person.');
   return {model:p.model,task_type:p.task,input:{
    version:'o1',video:videos[0],images,
    prompt:referenced,
-   resolution,duration,aspect_ratio:ratio,keep_original_audio:!!b.audio
+   resolution,aspect_ratio:ratio,keep_original_audio:!!b.audio
   }};
  }
  const input={prompt};
@@ -377,7 +381,7 @@ async function generate(b){
  }catch(err){
   if(/Invalid input/i.test(String(err.message||''))){
    if(p.id==='klingo1edit'){
-    throw bad('PiAPI declined Kling O1 editing (Invalid input). The app now sends the documented aspect_ratio, version, video and image references. Check that the video is 3–10 seconds, 720–2160 px in both dimensions, 24–60 fps, and playable from its temporary link; reference photos must be JPG/PNG. This is a provider validation failure, not proof the prompt is wrong. No automatic retry was made.',422);
+    throw bad('PiAPI refused Kling O1 editing (Invalid input). The app uses original-video editing syntax (no forced duration) and supports provider HEAD media checks. The remaining cause may be an inaccessible/unsupported source clip or PiAPI not accepting reference-video editing for this account. Do not repeatedly submit the same inputs; PiAPI charges when generation succeeds. No automatic retry was made.',422);
    }
    throw bad('PiAPI rejected the '+p.name+' request. '+(p.id==='seedance25'?'Check the source video is 4–30 seconds and choose 720p. ':'')+'Details: '+String(err.message||'').slice(0,200),422);
   }
@@ -389,7 +393,7 @@ async function status(id){if(!PIAPI)throw bad('PiAPI key missing');if(!/^[a-zA-Z
 const LOGIN='<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Framecraft • Sign in</title><style>body{font:16px system-ui;background:#0c101b;color:#fff;min-height:100vh;display:grid;place-items:center;margin:0}main{background:#1a2234;border:1px solid #384057;padding:32px;border-radius:18px;width:min(380px,85vw)}input,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border-radius:10px;font-size:16px}input{background:#0d1322;color:#fff;border:1px solid #58647d}button{background:#7a9aff;border:0;color:#0a172c;font-weight:bold}p{color:#aebbd1}</style><main><h1>Framecraft Studio</h1><p>Private GPT + PiAPI filmmaking workspace</p><form method="POST" action="/auth/login"><input type="password" name="password" placeholder="Studio password" required><button>Sign in</button></form></main></html>';
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');const route=new URL(req.url||'/', 'http://localhost').pathname;try{
 if(req.method==='GET'&&route==='/api/health')return send(res,200,{ok:true,configured:!!PASSWORD});
-if(req.method==='GET'&&route.startsWith('/public-media/')){
+if(['GET','HEAD'].includes(req.method)&&route.startsWith('/public-media/')){
  const ref=route.slice('/public-media/'.length);
  const m=/^([0-9a-f-]{36})\.(jpg|jpeg|png|webp|mp4|mov|mp3|wav)$/.exec(ref);
  if(!m||!mediaAllowed(req,m[1]))throw bad('Reference link invalid or expired',403);
