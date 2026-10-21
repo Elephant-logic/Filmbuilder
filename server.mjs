@@ -111,6 +111,61 @@ async function streamMedia(req,res,id){
  stream.on('error',()=>res.destroy());
  stream.pipe(res);
 }
+// Read the MP4/MOV movie-header duration without decoding or loading the
+// video into memory. Works whether the moov box is at the start or end.
+async function mp4Duration(file){
+ const fh=await open(file,'r');
+ try{
+  const total=(await fh.stat()).size;
+  async function readAt(pos,n){
+   if(pos<0||pos+n>total)return null;
+   const b=Buffer.alloc(n);
+   const {bytesRead}=await fh.read(b,0,n,pos);
+   return bytesRead===n?b:null;
+  }
+  async function boxes(start,end,depth){
+   let pos=start;
+   for(let i=0;i<20000&&pos+8<=end;i++){
+    const head=await readAt(pos,8);if(!head)break;
+    let size=head.readUInt32BE(0),headSize=8;
+    const type=head.toString('ascii',4,8);
+    if(size===1){
+     const extended=await readAt(pos+8,8);
+     if(!extended)return null;
+     const big=extended.readBigUInt64BE(0);
+     if(big>BigInt(Number.MAX_SAFE_INTEGER))return null;
+     size=Number(big);headSize=16;
+    }else if(size===0)size=end-pos;
+    if(size<headSize||pos+size>end)break;
+    if(type==='moov'&&depth===0){
+     const result=await boxes(pos+headSize,pos+size,1);
+     if(result!==null)return result;
+    }
+    if(type==='mvhd'&&depth===1){
+     const versionBuf=await readAt(pos+headSize,1);
+     if(!versionBuf)return null;
+     const v=versionBuf[0];
+     if(v===0){
+      const b=await readAt(pos+headSize,20);
+      if(!b)return null;
+      const scale=b.readUInt32BE(12),ticks=b.readUInt32BE(16);
+      return scale>0&&ticks>0?Math.round(ticks/scale*100)/100:null;
+     }
+     if(v===1){
+      const b=await readAt(pos+headSize,32);
+      if(!b)return null;
+      const scale=b.readUInt32BE(20),ticks=b.readBigUInt64BE(24);
+      return scale>0&&ticks>0n?Math.round(Number(ticks)/scale*100)/100:null;
+     }
+     return null;
+    }
+    pos+=size;
+   }
+   return null;
+  }
+  return await boxes(0,total,0);
+ }finally{await fh.close();}
+}
 async function uploadBinary(req){
  let name;try{name=decodeURIComponent(String(req.headers['x-file-name']||''))}catch{throw bad('Invalid filename')}
  name=path.basename(name).replace(/[\x00-\x1f]/g,'').slice(0,128);
@@ -135,9 +190,10 @@ async function uploadBinary(req){
   }
   if(!size)throw bad('The selected file is empty');
   await handle.close();handle=null;
-  const meta={id,name,mime,size,created:Date.now()};
+  const duration=mime.startsWith('video/')?await mp4Duration(file).catch(()=>null):null;
+  const meta={id,name,mime,size,created:Date.now(),...(Number.isFinite(duration)&&duration>0?{duration}:{})};
   await writeFile(path.join(STORAGE,id+'.json'),JSON.stringify(meta),{mode:0o600});
-  return {id,name,mime,size,url:'/api/media/'+id};
+  return {id,name,mime,size,...(meta.duration?{duration:meta.duration}:{}),url:'/api/media/'+id};
  }catch(e){
   if(handle)await handle.close().catch(()=>{});
   await unlink(file).catch(()=>{});
@@ -316,15 +372,16 @@ if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,p
 if(req.method==='GET'&&route.startsWith('/api/media/'))return await streamMedia(req,res,route.split('/').pop());
 if(req.method==='GET'&&route==='/api/assets/status'){
  const ids=(new URL(req.url||'/', 'http://localhost').searchParams.get('ids')||'').split(',').filter(Boolean).slice(0,50);
- const valid=[],missing=[];
+ const valid=[],missing=[],durations={};
  for(const id of ids){
   try{
-   await asset(id,false);
+   const metadata=await asset(id,false);
    await stat(path.join(STORAGE,id+'.bin'));
    valid.push(id);
+   if(Number.isFinite(metadata.duration))durations[id]=metadata.duration;
   }catch{missing.push(id)}
  }
- return send(res,200,{valid,missing});
+ return send(res,200,{valid,missing,durations});
 }
 if(req.method==='GET'&&route.startsWith('/api/reference/')){const id=route.split('/').pop(),a=await asset(id,false);return send(res,200,{url:signedMediaUrl(id,a.name),expiresInSeconds:21600});}
 if(req.method==='GET'&&route.startsWith('/api/task/'))return send(res,200,await status(route.split('/').pop()));
