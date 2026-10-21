@@ -8,6 +8,6 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --check server.mjs && node --check public/app-syntax-check.mjs"
+    "test": "node --check server.mjs && node public/app-syntax-check.mjs"
   }
 }
