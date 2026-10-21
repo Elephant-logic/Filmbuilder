@@ -95,7 +95,7 @@ assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',dura
 assert.throws(()=>task({preset:'klingo1edit',action:'edit',prompt:'replace',duration:5},sameRefs.concat([{type:'video',url:'https://example.com/second.mp4'}])),/exactly one/);
 console.log('Kling O1 same-scene character-replacement payload tests passed');
 const omni=task({
- preset:'kling3omni',action:'edit',prompt:'Replace the subject in the same room and motion.',
+ preset:'kling3omni',action:'create',prompt:'Generate a new video inspired by the scene.',
  ratio:'9:16',duration:8,resolution:'720p',audio:true
 },sameRefs);
 assert.equal(omni.model,'kling');
@@ -112,12 +112,12 @@ assert.equal(omni.input.resolution,'720p');
 assert.equal(omni.input.keep_original_audio,true);
 assert.equal(omni.config.service_mode,'public');
 assert.equal(omni.input.multi_shots,undefined);
-assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs),/Edit existing video/);
-assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8},sameRefs.slice(0,1)),/1–4/);
-assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8},sameRefs.concat([{type:'video',url:'https://example.com/other.mp4'}])),/exactly one/);
-assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:16},sameRefs),/3 and 15/);
-assert.throws(()=>task({preset:'kling3omni',action:'edit',prompt:'test',duration:8,ratio:'adaptive'},sameRefs),/aspect ratio/);
-const cleanTags=task({preset:'kling3omni',action:'edit',prompt:'Use @video1 and @image1, keep movement',duration:8,ratio:'9:16'},sameRefs);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs),/NEW/);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs.slice(0,1)),/1–4/);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8},sameRefs.concat([{type:'video',url:'https://example.com/other.mp4'}])),/exactly one/);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:16},sameRefs),/3 and 15/);
+assert.throws(()=>task({preset:'kling3omni',action:'create',prompt:'test',duration:8,ratio:'adaptive'},sameRefs),/aspect ratio/);
+const cleanTags=task({preset:'kling3omni',action:'create',prompt:'Use @video1 and @image1, keep movement',duration:8,ratio:'9:16'},sameRefs);
 assert.match(cleanTags.input.prompt,/@video\b/);
 assert.match(cleanTags.input.prompt,/@image_1\b/);
 assert.doesNotMatch(cleanTags.input.prompt,/@video1|@image1/);
