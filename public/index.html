@@ -171,7 +171,53 @@ $('frameMaskCanvas').onpointermove=e=>{if(maskPainting){e.preventDefault();paint
 $('frameMaskCanvas').onpointerup=e=>{if(maskPainting){e.preventDefault();paintFrameMask(e);}maskPainting=false;maskPoint=null;};
 $('frameMaskCanvas').onpointercancel=()=>{maskPainting=false;maskPoint=null;};
 $('frameMaskClear').onclick=()=>{if(!maskBuffer)return;maskBuffer.getContext('2d').clearRect(0,0,maskBuffer.width,maskBuffer.height);maskTouched=false;showFrameMaskPreview();$('frameMaskStatus').textContent='Selection cleared. Paint the person before generating.';};
-function renderJobs(){const box=$('jobs');box.textContent='';if(!state.jobs.length){box.textContent='No jobs submitted.';return;}state.jobs.forEach(j=>{const n=el('div','job');n.append(el('div','tag',j.model+' • '+j.id));n.append(el('div','',j.status||'submitted'));if(j.error)n.append(el('div','warning',j.error));(j.media||[]).forEach(m=>{if(m.type==='video'){const v=el('video');v.src=m.url;v.controls=true;v.playsInline=true;n.append(v);}else if(m.type==='image'){const v=el('img');v.src=m.url;v.alt='PiAPI generation';n.append(v);}const a=el('a','','Open result ↗');a.href=m.url;a.target='_blank';a.rel='noopener noreferrer';n.append(a);});box.append(n);});}
+async function imageForMaskComposite(url){
+ const r=await fetch(url);
+ if(!r.ok)throw Error('Image unavailable for compositing (HTTP '+r.status+'). Check stored uploads are still available.');
+ const objectUrl=URL.createObjectURL(await r.blob());
+ try{return await new Promise((resolve,reject)=>{
+  const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(Error('Unable to decode composite image'));img.src=objectUrl;
+ });}finally{URL.revokeObjectURL(objectUrl);}
+}
+async function compositeMaskedFrame(job){
+ if(!job.frameMask)throw Error('Missing mask job metadata');
+ const original=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.baseId));
+ const edited=await imageForMaskComposite('/api/job-image/'+encodeURIComponent(job.id));
+ const mask=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.maskId));
+ const scale=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
+ const w=Math.max(1,Math.round(original.naturalWidth*scale)),height=Math.max(1,Math.round(original.naturalHeight*scale));
+ const target=document.createElement('canvas');target.width=w;target.height=height;
+ const output=target.getContext('2d');output.drawImage(original,0,0,w,height);
+ const changes=document.createElement('canvas');changes.width=w;changes.height=height;
+ const changesCtx=changes.getContext('2d');changesCtx.drawImage(edited,0,0,w,height);
+ const matte=document.createElement('canvas');matte.width=w;matte.height=height;
+ const mc=matte.getContext('2d',{willReadFrequently:true});mc.drawImage(mask,0,0,w,height);
+ const pixels=mc.getImageData(0,0,w,height);
+ for(let i=0;i<pixels.data.length;i+=4){
+  pixels.data[i+3]=pixels.data[i];pixels.data[i]=255;pixels.data[i+1]=255;pixels.data[i+2]=255;
+ }
+ mc.putImageData(pixels,0,0);
+ changesCtx.globalCompositeOperation='destination-in';changesCtx.drawImage(matte,0,0);
+ output.drawImage(changes,0,0);
+ const blob=await new Promise(resolve=>target.toBlob(resolve,'image/png'));
+ if(!blob)throw Error('Could not export PNG image');
+ return URL.createObjectURL(blob);
+}
+function renderJobs(){const box=$('jobs');box.textContent='';if(!state.jobs.length){box.textContent='No jobs submitted.';return;}state.jobs.forEach(j=>{const n=el('div','job');n.append(el('div','tag',j.model+' • '+j.id));n.append(el('div','',j.status||'submitted'));if(j.error)n.append(el('div','warning',j.error));
+ if(j.frameMask&&(j.media||[]).some(m=>m.type==='image')&&String(j.status).toLowerCase()==='completed'){
+  const btn=el('button','link-btn','Restore original background · Download masked PNG');
+  btn.onclick=async()=>{
+   btn.disabled=true;btn.textContent='Building masked composite…';
+   try{
+    const url=await compositeMaskedFrame(j);
+    const link=el('a','','Download masked frame PNG ↧');link.href=url;link.download='filmbuilder-masked-frame.png';link.style.display='block';
+    n.append(link);
+    const preview=el('img');preview.src=url;preview.alt='Masked character with original background restored';n.append(preview);
+    btn.textContent='Masked PNG ready';
+   }catch(e){n.append(el('div','warning','Mask composite failed: '+e.message));btn.disabled=false;btn.textContent='Retry composite';}
+  };n.append(btn);
+ }
+ (j.media||[]).forEach(m=>{if(m.type==='video'){const v=el('video');v.src=m.url;v.controls=true;v.playsInline=true;n.append(v);}else if(m.type==='image'){const v=el('img');v.src=m.url;v.alt='PiAPI generation';n.append(v);}const a=el('a','','Open result ↗');a.href=m.url;a.target='_blank';a.rel='noopener noreferrer';n.append(a);});box.append(n);});}
 async function api(route,data){
  let res;
  try{
@@ -290,6 +336,14 @@ async function generate(){
  if(choice.id.startsWith('seedance')&&!['480p','720p','1080p'].includes($('resolution').value)){
   $('resolution').value='720p';
  }
+ if(['nanoframe','nanoframemask'].includes(choice.id)){
+  const imgs=state.assets.filter(a=>a.mime?.startsWith('image/'));
+  if(action!=='create'){alert('Nano Banana edits a single image frame. Choose Create, not Edit existing video.');$('action').value='create';return;}
+  if(state.assets.length!==2||imgs.length!==2||hosted.length){alert('Upload ONLY 2 local images in order: 1) original frame, 2) replacement character. Remove other assets and hosted URLs.');return;}
+  if(!['1K','2K','4K'].includes($('resolution').value)){alert('Choose 1K, 2K or 4K resolution.');return;}
+  if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value)){alert('Choose an aspect ratio matching the original frame.');return;}
+  if(choice.id==='nanoframemask'&&(!maskBuffer||!maskTouched)){alert('Paint over the person on the mask canvas before generating.');return;}
+ }
  if(choice.id==='kling3omni'){
   const images=state.assets.filter(a=>a.mime?.startsWith('image/'));
   const externalImages=hosted.filter(r=>r.type==='image');
@@ -350,13 +404,17 @@ async function generate(){
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
  const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':choice.id==='kling3omni'?'\nNOT A CHARACTER SWAP. This generates a NEW video from references and may completely change the source scene. Published 720p base price without generated audio for '+Number($('duration').value)+'s is $'+(Number($('duration').value)*($('resolution').value==='1080p'?0.15:0.1)).toFixed(2)+'. Check actual video reference billing. Full background preservation is NOT guaranteed.':' ';
- const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
+ const frameCost=['nanoframe','nanoframemask'].includes(choice.id)?'\nONE IMAGE FRAME only, not an entire video. PiAPI price per generation: $'+({'1K':'0.03','2K':'0.04','4K':'0.09'}[$('resolution').value]||'0.03')+(choice.id==='nanoframemask'?'. The app applies your mask AFTER image generation and restores the original pixels outside it; Nano Banana itself has no native mask.':'.'):'';
+ const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+frameCost+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
  try{
   const removed=await verifyAssets();
   if(removed)throw Error('Some reference files expired after a server restart. Upload them again before spending credits.');
+  let maskUpload=null;
+  if(choice.id==='nanoframemask')maskUpload=await uploadFrameMask();
   const r=await api('/api/generate',{preset:choice.id,prompt,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls:hosted,custom});
+  if(maskUpload)r.frameMask={baseId:state.assets[0].id,maskId:maskUpload.id};
   if(!r.id)throw Error('Task ID missing. Check PiAPI history before retrying to avoid duplicate charges.');
   state.jobs.unshift(r);save();renderJobs();$('jobsBox').scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){alert('Generation error: '+e.message);}
