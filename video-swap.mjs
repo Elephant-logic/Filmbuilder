@@ -128,7 +128,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    await sleep(pollIntervalMs);
    response=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(taskId),
     {headers:{'X-API-Key':piapiKey}},30000);
-   const data=response.data?.task_id?response.data:response;
+   const data=response.data&&typeof response.data==='object'?response.data:response;
    const status=String(data.status||'').toLowerCase();
    if(status==='completed'){
     const image=getImageResult(data.output||{});
