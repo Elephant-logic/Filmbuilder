@@ -36,12 +36,12 @@
   <div class="field"><label>Image quality</label><select id="vsQuality"><option value="low">Low · cheapest</option><option value="medium">Medium · more expensive</option><option value="high">High · significantly more expensive</option></select></div>
  </div>
  <div class="duo">
-  <div class="field"><label>Video FPS (frames edited per second)</label><select id="vsFps"><option value="8">8 fps · cheapest test</option><option value="12">12 fps</option><option value="24">24 fps · most expensive</option></select></div>
+  <div class="field"><label>Video FPS (frames edited per second)</label><select id="vsFps"><option value="24" selected>24 fps · recommended, smoother</option><option value="30">30 fps · matches many phone recordings</option><option value="12">12 fps · cheaper test</option><option value="8">8 fps · cheapest, choppy</option></select></div>
   <div class="field"><label>Extra instructions</label><textarea id="vsPrompt" rows="2" placeholder="e.g. blonde hair, purple sunglasses, yellow jacket"></textarea></div>
  </div>
  <label style="display:block;margin:7px 0"><input id="vsSound" type="checkbox" checked> Keep sound from original video</label>
  <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox" checked> Use previous edited frame as consistency guide</label>
- <p class="fine warning">Maximum 10-second source, 240 edited frames. Reconstructed FPS may differ from your source; lower FPS looks less smooth. PiAPI charges PER IMAGE EDIT, not per video. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
+ <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. PiAPI charges PER IMAGE EDIT, not per video. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
  <div id="vsJob" class="field" style="margin-top:12px" role="status" aria-live="polite">Upload a video and character image to start.</div>
  <button id="vsPreview" type="button" class="primary hide" style="width:100%">2. Pay for ONE preview frame</button>
