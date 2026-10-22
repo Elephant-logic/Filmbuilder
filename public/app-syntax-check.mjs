@@ -212,6 +212,23 @@ assert.match(page,/uploadNativeGPTMask/);
 assert.match(page,/id="gptQuality"/);
 assert.match(page,/gptQuality:/);
 assert.match(page,/\?\x27\/api\/gpt-task\/\x27/);
+const fakePng=Buffer.from([137,80,78,71,13,10,26,10,1,2,3]);
+let cacheWritten=null;
+const gptStatus=vm.runInNewContext(source+'; gptFrameStatus',{
+ ...sandbox,Buffer,STORAGE:'/synthetic-storage',PIAPI:'test-key',path:await import('node:path'),
+ stat:async()=>{throw Error('not cached');},
+ writeFile:async (file,bytes)=>{cacheWritten={file,bytes};},
+ provider:async()=>({task_id:'fake-task',status:'completed',output:{data:[{b64_json:fakePng.toString('base64')}],usage:{total_tokens:3000}}})
+});
+const taskReceipt=await gptStatus('fake-task');
+assert.equal(taskReceipt.status,'completed');
+assert.equal(taskReceipt.gptImage,true);
+assert.equal(taskReceipt.media[0].url,'/api/gpt-image/fake-task');
+assert.ok(cacheWritten.bytes.equals(fakePng));
+assert.equal(taskReceipt.raw,undefined,'No raw base64 provider task is stored by the browser');
+assert.ok(!JSON.stringify(taskReceipt).includes(fakePng.toString('base64')));
+console.log('GPT Image private base64 image caching and response tests passed');
+
 console.log('GPT Image 2.5 async edit payload, masks, quality, and safe output tests passed');
 
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
