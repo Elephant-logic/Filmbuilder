@@ -21,7 +21,7 @@ assert.match(videoFramePrompt(2),/PRIMARY visual authority/);
 assert.doesNotMatch(videoFramePrompt(2),/Image 4/,'frame 2 must not reference duplicate previous=anchor');
 assert.match(videoFramePrompt(3),/Image 4 is the PREVIOUS EDITED FRAME/);
 assert.match(videoFramePrompt(3),/ALWAYS follow Image 3/);
-assert.match(videoFramePrompt(3),/NOT copy its pose/);
+assert.match(videoFramePrompt(3),/NEVER copy its pose/);
 assert.match(videoFramePrompt(3,'',false),/Image 3 is the LOCKED/);
 assert.doesNotMatch(videoFramePrompt(3,'',false),/Image 4/);
 assert.equal(frameOutputSize(1920,1080),'1536x1024');
