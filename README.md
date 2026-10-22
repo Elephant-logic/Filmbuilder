@@ -76,3 +76,16 @@ PiAPI's February 26, 2026 article said video-reference input was not yet support
 The PiAPI docs explicitly say `input.video` is a reference for the generated video's *style/content*. A real result in this app animated the reference character image but did not retain the source scene. The Omni preset is now clearly labelled **Video Reference (Not a Swap)**, uses the **Create** operation, and gives a prominent warning before credit-bearing jobs. GPT guidance no longer suggests it for replacing a whole character inside the exact original video. This is a capability clarification, not a paid-generation fix.
 
 For genuine whole-person replacement inside the existing footage, consider a dedicated **Wan 2.2 Animate Replace** service from fal.ai or Replicate, or **P-Video-Replace** from Runware. Those are separate providers, not supported by the current PiAPI key. Their outputs still need manual assessment.
+
+### Nano Banana 2.1 character replacement for one frame (PiAPI key)
+
+The Production Board now includes two options:
+
+- **Nano Banana 2.1 · Replace Character (1 Frame)** sends exactly two uploaded images to PiAPI in order: the **original video frame first** and the **replacement character image second**. No mask is needed. Choose **Create**, a frame-matching aspect ratio, and 1K ($0.03), 2K ($0.04) or 4K ($0.09) for one image generation. The original frame plus character image are sent using documented `model: gemini`, `task_type: nano-banana-2.1`, `input.image_urls`.
+- **Nano Banana 2.1 · Replace Character (Masked Frame)** uses the exact same **one-image-generation** PiAPI task. Before submitting, paint the subject inside Filmbuilder's touch-enabled canvas. The mask is saved as an extra local PNG upload **without adding it to PiAPI reference inputs**. On completion, tap **Restore original background · Download masked PNG**. Filmbuilder downloads the generated image through an authenticated, provider-output-only proxy, then locally composites edited pixels **inside** the painted selection over the original frame pixels **outside** the selection. No second generation or charge is incurred by the local compositing operation.
+
+**Important:** PiAPI's Nano Banana 2.1 API does **not** document a native mask parameter. Character pose/identity and the edited foreground can still drift. Compositing may misalign if the model changes camera crop or subject position; match the output aspect ratio to the original frame. The mask and original asset must still be present on the Render instance when compositing; an app redeploy may remove temporary uploads. Outputs are limited to 2048 pixels on the longest side during compositing for mobile memory safety.
+
+These options **edit one image frame, not a video**. They do not automatically extract all frames from an MP4, keep temporal consistency, or rebuild a movie. Any future full-video workflow must include explicit batch-cost confirmation.
+
+Docs: https://app.piapi.ai/nano-banana-2-1

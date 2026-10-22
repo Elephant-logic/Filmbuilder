@@ -19,7 +19,13 @@
 <div class="composer"><div class="composerbox"><textarea id="message" rows="2" placeholder="Describe your image, video, scene or question…"></textarea><button class="primary" id="send">Send ↑</button></div><div class="fine">GPT plans and recommends. You review the production board before spending PiAPI credits.</div></div></main>
 <section class="workspace" id="workspace"><div class="row" id="boardToggle"><h2>Production board</h2><span class="badge" id="boardBadge">Image + Video</span></div>
 <div class="group"><h3>Reference material</h3><label class="upload">＋ Upload photos, MP4/MOV videos or audio (up to 100 MB each)<input id="upload" type="file" multiple accept="image/*,video/*,audio/*,.mp4,.mov"></label><p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p><div class="assets" id="assets"></div><p class="fine warning">Seedance 2.5 editing needs a 4–30 second source video. If yours is longer: Samsung Gallery → open video → pencil/Edit → trim to around 8–12 seconds → Save as copy → upload the trimmed version.</p><p class="fine">GPT can inspect uploaded images. Filmbuilder automatically hosts references when generating. Tap Get URL to copy a temporary HTTPS link: PiAPI hosting lasts up to 24 hours for eligible small files; otherwise Render links last up to 6 hours and can disappear after restart. Anyone holding a link can access that file.</p><div class="field"><label>Additional hosted HTTPS reference URLs (one per line)</label><textarea id="references" rows="2" placeholder="https://example.com/reference.mp4"></textarea></div></div>
-<div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> <span id="audioLabel">Request generated audio (supported models)</span></label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
+<div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div>
+<div class="field hide" id="frameMaskWrap"><label>Paint the person to replace</label>
+ <p class="fine">The first uploaded image is your ORIGINAL FRAME. The second is your REPLACEMENT CHARACTER. Paint the person's hair, body and clothing. Outside your brush selection, original pixels will be restored after generation. Nano Banana itself does not support a native mask parameter.</p>
+ <canvas id="frameMaskCanvas" style="display:block;width:100%;max-width:100%;height:auto;background:#111;border:1px solid #53637c;border-radius:10px;touch-action:none;cursor:crosshair"></canvas>
+ <div class="duo" style="margin-top:8px"><label>Brush width<input id="frameMaskSize" type="range" min="8" max="200" value="55"></label><button id="frameMaskClear" type="button">Clear selection</button></div>
+ <p class="fine" id="frameMaskStatus" aria-live="polite">Upload the original frame first.</p>
+</div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> <span id="audioLabel">Request generated audio (supported models)</span></label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
 <div class="group"><h3>Storyboard / shot list</h3><div id="shots" class="muted">Ask GPT to create a storyboard.</div></div><div class="group" id="jobsBox"><div class="row"><h3 style="margin:0">Generation queue</h3><button id="refresh" style="background:transparent;color:#abc4ff;border:0">↻ Refresh</button></div><div id="jobs" class="muted">No jobs submitted.</div></div>
 <div class="fine">API keys stay on the server. Uploaded media, chat history and results require your studio login. Chat and jobs are saved only in this browser.</div></section>
 </div>
@@ -28,7 +34,8 @@ const $=id=>document.getElementById(id);
 const cacheKey='framecraft-filmbuilder-v1';
 let state={history:[],assets:[],jobs:[],plan:null};
 try {const old=JSON.parse(localStorage.getItem(cacheKey));if(old&&typeof old==='object')state={...state,...old};} catch {}
-let models=[],busy=false;
+let models=[],busy=false,lastModelSelection=null;
+let maskBuffer=null,maskFrameId=null,maskBaseImage=null,maskTouched=false,maskPainting=false,maskPoint=null;
 function save(){localStorage.setItem(cacheKey,JSON.stringify(state));}
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
 function say(role,text){const n=el('div','bubble '+role,text);$('messages').append(n);$('messages').scrollTop=$('messages').scrollHeight;}
@@ -111,12 +118,106 @@ function renderAssets(){
    }finally{getLink.disabled=false;}
   };
   x.append(getLink);
-  const b=el('button','','×');b.title='Remove';b.onclick=()=>{state.assets=state.assets.filter(y=>y.id!==a.id);save();renderAssets();};
+  const b=el('button','','×');b.title='Remove';b.onclick=()=>{state.assets=state.assets.filter(y=>y.id!==a.id);save();renderAssets();syncFrameMask();};
   x.append(b);box.append(x);
  });
 }
 function renderShots(shots){const box=$('shots');box.textContent='';if(!Array.isArray(shots)||!shots.length){box.textContent='Ask GPT to create a storyboard.';return;}shots.forEach((s,i)=>{const n=el('div','shot');n.append(el('strong','',(i+1)+'. '+String(s.title||'Shot')));n.append(el('div','',String(s.description||'')));if(s.seconds)n.append(el('small','muted',String(s.seconds)+' sec'));box.append(n);});}
-function renderJobs(){const box=$('jobs');box.textContent='';if(!state.jobs.length){box.textContent='No jobs submitted.';return;}state.jobs.forEach(j=>{const n=el('div','job');n.append(el('div','tag',j.model+' • '+j.id));n.append(el('div','',j.status||'submitted'));if(j.error)n.append(el('div','warning',j.error));(j.media||[]).forEach(m=>{if(m.type==='video'){const v=el('video');v.src=m.url;v.controls=true;v.playsInline=true;n.append(v);}else if(m.type==='image'){const v=el('img');v.src=m.url;v.alt='PiAPI generation';n.append(v);}const a=el('a','','Open result ↗');a.href=m.url;a.target='_blank';a.rel='noopener noreferrer';n.append(a);});box.append(n);});}
+function showFrameMaskPreview(){
+ if(!maskBuffer||!maskBaseImage)return;
+ const cv=$('frameMaskCanvas'),g=cv.getContext('2d');g.clearRect(0,0,cv.width,cv.height);
+ g.drawImage(maskBaseImage,0,0,cv.width,cv.height);
+ g.save();g.globalAlpha=.45;g.drawImage(maskBuffer,0,0);g.restore();
+}
+function syncFrameMask(){
+ const active=$('model').value==='nanoframemask';
+ $('frameMaskWrap').classList.toggle('hide',!active);
+ if(!active)return;
+ const original=state.assets.find(a=>a.mime?.startsWith('image/'));
+ if(!original){maskFrameId=null;maskBuffer=null;maskTouched=false;$('frameMaskStatus').textContent='Upload original frame first, then the character picture.';return;}
+ if(maskFrameId===original.id&&maskBuffer)return;
+ maskFrameId=original.id;maskBuffer=null;maskTouched=false;
+ $('frameMaskStatus').textContent='Loading original frame…';
+ const img=new Image();img.onload=()=>{
+  if(maskFrameId!==original.id)return;
+  const scale=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
+  const cv=$('frameMaskCanvas');cv.width=Math.max(1,Math.round(img.naturalWidth*scale));cv.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  maskBaseImage=img;maskBuffer=document.createElement('canvas');maskBuffer.width=cv.width;maskBuffer.height=cv.height;
+  showFrameMaskPreview();$('frameMaskStatus').textContent='Paint the person in white, including clothing. Clear selection to restart.';
+ };
+ img.onerror=()=>{$('frameMaskStatus').textContent='Unable to load original frame — upload it again.';};
+ img.src='/api/media/'+encodeURIComponent(original.id);
+}
+function paintFrameMask(e){
+ if(!maskBuffer)return;
+ const cv=$('frameMaskCanvas'),r=cv.getBoundingClientRect();
+ const x=(e.clientX-r.left)*cv.width/r.width,y=(e.clientY-r.top)*cv.height/r.height;
+ const g=maskBuffer.getContext('2d');g.lineCap='round';g.lineJoin='round';g.lineWidth=Number($('frameMaskSize').value);
+ g.fillStyle='#fff';g.strokeStyle='#fff';g.beginPath();
+ if(maskPoint){g.moveTo(maskPoint.x,maskPoint.y);g.lineTo(x,y);g.stroke();}
+ else {g.arc(x,y,g.lineWidth/2,0,Math.PI*2);g.fill();}
+ maskPoint={x,y};maskTouched=true;showFrameMaskPreview();
+}
+async function uploadFrameMask(){
+ if(!maskBuffer||!maskTouched)throw Error('Paint a selection over the character first.');
+ const cv=document.createElement('canvas');cv.width=maskBuffer.width;cv.height=maskBuffer.height;const g=cv.getContext('2d');
+ g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height);g.drawImage(maskBuffer,0,0);
+ const blob=await new Promise(resolve=>cv.toBlob(resolve,'image/png'));
+ if(!blob)throw Error('Unable to save selection');
+ return await uploadOne(new File([blob],'frame-selection-mask.png',{type:'image/png'}));
+}
+$('frameMaskCanvas').onpointerdown=e=>{if(!maskBuffer)return;e.preventDefault();maskPainting=true;maskPoint=null;$('frameMaskCanvas').setPointerCapture(e.pointerId);paintFrameMask(e);};
+$('frameMaskCanvas').onpointermove=e=>{if(maskPainting){e.preventDefault();paintFrameMask(e);}};
+$('frameMaskCanvas').onpointerup=e=>{if(maskPainting){e.preventDefault();paintFrameMask(e);}maskPainting=false;maskPoint=null;};
+$('frameMaskCanvas').onpointercancel=()=>{maskPainting=false;maskPoint=null;};
+$('frameMaskClear').onclick=()=>{if(!maskBuffer)return;maskBuffer.getContext('2d').clearRect(0,0,maskBuffer.width,maskBuffer.height);maskTouched=false;showFrameMaskPreview();$('frameMaskStatus').textContent='Selection cleared. Paint the person before generating.';};
+async function imageForMaskComposite(url){
+ const r=await fetch(url);
+ if(!r.ok)throw Error('Image unavailable for compositing (HTTP '+r.status+'). Check stored uploads are still available.');
+ const objectUrl=URL.createObjectURL(await r.blob());
+ try{return await new Promise((resolve,reject)=>{
+  const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(Error('Unable to decode composite image'));img.src=objectUrl;
+ });}finally{URL.revokeObjectURL(objectUrl);}
+}
+async function compositeMaskedFrame(job){
+ if(!job.frameMask)throw Error('Missing mask job metadata');
+ const original=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.baseId));
+ const edited=await imageForMaskComposite('/api/job-image/'+encodeURIComponent(job.id));
+ const mask=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.maskId));
+ const scale=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
+ const w=Math.max(1,Math.round(original.naturalWidth*scale)),height=Math.max(1,Math.round(original.naturalHeight*scale));
+ const target=document.createElement('canvas');target.width=w;target.height=height;
+ const output=target.getContext('2d');output.drawImage(original,0,0,w,height);
+ const changes=document.createElement('canvas');changes.width=w;changes.height=height;
+ const changesCtx=changes.getContext('2d');changesCtx.drawImage(edited,0,0,w,height);
+ const matte=document.createElement('canvas');matte.width=w;matte.height=height;
+ const mc=matte.getContext('2d',{willReadFrequently:true});mc.drawImage(mask,0,0,w,height);
+ const pixels=mc.getImageData(0,0,w,height);
+ for(let i=0;i<pixels.data.length;i+=4){
+  pixels.data[i+3]=pixels.data[i];pixels.data[i]=255;pixels.data[i+1]=255;pixels.data[i+2]=255;
+ }
+ mc.putImageData(pixels,0,0);
+ changesCtx.globalCompositeOperation='destination-in';changesCtx.drawImage(matte,0,0);
+ output.drawImage(changes,0,0);
+ const blob=await new Promise(resolve=>target.toBlob(resolve,'image/png'));
+ if(!blob)throw Error('Could not export PNG image');
+ return URL.createObjectURL(blob);
+}
+function renderJobs(){const box=$('jobs');box.textContent='';if(!state.jobs.length){box.textContent='No jobs submitted.';return;}state.jobs.forEach(j=>{const n=el('div','job');n.append(el('div','tag',j.model+' • '+j.id));n.append(el('div','',j.status||'submitted'));if(j.error)n.append(el('div','warning',j.error));
+ if(j.frameMask&&(j.media||[]).some(m=>m.type==='image')&&String(j.status).toLowerCase()==='completed'){
+  const btn=el('button','link-btn','Restore original background · Download masked PNG');
+  btn.onclick=async()=>{
+   btn.disabled=true;btn.textContent='Building masked composite…';
+   try{
+    const url=await compositeMaskedFrame(j);
+    const link=el('a','','Download masked frame PNG ↧');link.href=url;link.download='filmbuilder-masked-frame.png';link.style.display='block';
+    n.append(link);
+    const preview=el('img');preview.src=url;preview.alt='Masked character with original background restored';n.append(preview);
+    btn.textContent='Masked PNG ready';
+   }catch(e){n.append(el('div','warning','Mask composite failed: '+e.message));btn.disabled=false;btn.textContent='Retry composite';}
+  };n.append(btn);
+ }
+ (j.media||[]).forEach(m=>{if(m.type==='video'){const v=el('video');v.src=m.url;v.controls=true;v.playsInline=true;n.append(v);}else if(m.type==='image'){const v=el('img');v.src=m.url;v.alt='PiAPI generation';n.append(v);}const a=el('a','','Open result ↗');a.href=m.url;a.target='_blank';a.rel='noopener noreferrer';n.append(a);});box.append(n);});}
 async function api(route,data){
  let res;
  try{
@@ -164,9 +265,18 @@ function syncModel(){
  }
  $('boardBadge').textContent=m?m.type:'Choose model';
  $('customWrap').classList.toggle('hide',!m||m.id!=='custom');
+ const isFrameSwap=['nanoframe','nanoframemask'].includes(m?.id);
+ const modelChanged=m?.id!==lastModelSelection;
+ if(isFrameSwap&&modelChanged)$('resolution').value='1K';
+ lastModelSelection=m?.id;
  if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';
  if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
- if(m?.id==='klingo1edit'){
+ if(['nanoframe','nanoframemask'].includes(m?.id)){
+  $('action').value='create';
+  if(!['1K','2K','4K'].includes($('resolution').value))$('resolution').value='1K';
+  if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value))$('ratio').value='9:16';
+  if(!$('prompt').value.trim())$('prompt').value='Replace the whole main person, including face, body, hair and clothes, with the character in the second reference image. Preserve the original frame composition, pose, scenery, lighting and camera view.';
+ }else if(m?.id==='klingo1edit'){
   $('action').value='edit';
   // Editing a base video inherits the source duration; the field is not sent.
   $('duration').value=10;
@@ -185,7 +295,10 @@ function syncModel(){
  $('duration').disabled=m?.id==='klingo1edit';
  $('duration').title=m?.id==='klingo1edit'?'Kling O1 source-video edits keep the length of the uploaded video.':'Generated clip duration in seconds';
  $('audioLabel').textContent=['klingo1edit','kling3omni'].includes(m?.id)?'Keep original video audio':'Request generated audio (supported models)';
+ syncFrameMask();
  const descriptions={
+  nanoframe:'SINGLE FRAME only. Upload 2 images in order: original video FRAME first, replacement CHARACTER second. No masking. Nano Banana 2.1 costs $0.03 at 1K, $0.04 at 2K, or $0.09 at 4K per image generation.',
+  nanoframemask:'SINGLE FRAME only. Upload ORIGINAL FRAME first and CHARACTER image second, then paint the person. Nano Banana has no native mask input: after generation the app composites edited subject pixels over the original outside the mask. 1K $0.03, 2K $0.04, 4K $0.09 per image generation.',
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
   kling3omni:'NOT A CHARACTER SWAP. PiAPI describes this as reference-guided generation: upload one MP4/MOV and 1–4 images to influence a NEW video. Your previous output was driven by the character image, not the original scene. Do not use this mode to preserve background, camera, actions and timing. It can cost credits even when the result ignores those details.',
   klingo1edit:'UNVERIFIED EXPERIMENTAL PiAPI video editing. Use a 3–10 second MP4/MOV, plus 1–4 character JPG/PNG images. Uses @video and @image_1. Output framing and duration follow the source (both controls disabled). PiAPI has repeatedly returned 10003 Invalid input for this workflow; do not pay for repeated identical attempts. For original-scene replacement consider Wan Animate Replace from a provider that explicitly supports replacement mode.',
@@ -226,6 +339,14 @@ async function generate(){
  }
  if(choice.id.startsWith('seedance')&&!['480p','720p','1080p'].includes($('resolution').value)){
   $('resolution').value='720p';
+ }
+ if(['nanoframe','nanoframemask'].includes(choice.id)){
+  const imgs=state.assets.filter(a=>a.mime?.startsWith('image/'));
+  if(action!=='create'){alert('Nano Banana edits a single image frame. Choose Create, not Edit existing video.');$('action').value='create';return;}
+  if(state.assets.length!==2||imgs.length!==2||hosted.length){alert('Upload ONLY 2 local images in order: 1) original frame, 2) replacement character. Remove other assets and hosted URLs.');return;}
+  if(!['1K','2K','4K'].includes($('resolution').value)){alert('Choose 1K, 2K or 4K resolution.');return;}
+  if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value)){alert('Choose an aspect ratio matching the original frame.');return;}
+  if(choice.id==='nanoframemask'&&(!maskBuffer||!maskTouched)){alert('Paint over the person on the mask canvas before generating.');return;}
  }
  if(choice.id==='kling3omni'){
   const images=state.assets.filter(a=>a.mime?.startsWith('image/'));
@@ -287,13 +408,17 @@ async function generate(){
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
  const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':choice.id==='kling3omni'?'\nNOT A CHARACTER SWAP. This generates a NEW video from references and may completely change the source scene. Published 720p base price without generated audio for '+Number($('duration').value)+'s is $'+(Number($('duration').value)*($('resolution').value==='1080p'?0.15:0.1)).toFixed(2)+'. Check actual video reference billing. Full background preservation is NOT guaranteed.':' ';
- const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
+ const frameCost=['nanoframe','nanoframemask'].includes(choice.id)?'\nONE IMAGE FRAME only, not an entire video. PiAPI price per generation: $'+({'1K':'0.03','2K':'0.04','4K':'0.09'}[$('resolution').value]||'0.03')+(choice.id==='nanoframemask'?'. The app applies your mask AFTER image generation and restores the original pixels outside it; Nano Banana itself has no native mask.':'.'):'';
+ const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+frameCost+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
  try{
   const removed=await verifyAssets();
   if(removed)throw Error('Some reference files expired after a server restart. Upload them again before spending credits.');
+  let maskUpload=null;
+  if(choice.id==='nanoframemask')maskUpload=await uploadFrameMask();
   const r=await api('/api/generate',{preset:choice.id,prompt,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls:hosted,custom});
+  if(maskUpload)r.frameMask={baseId:state.assets[0].id,maskId:maskUpload.id};
   if(!r.id)throw Error('Task ID missing. Check PiAPI history before retrying to avoid duplicate charges.');
   state.jobs.unshift(r);save();renderJobs();$('jobsBox').scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){alert('Generation error: '+e.message);}
@@ -331,7 +456,7 @@ async function uploads(files){
   try{
    $('uploadStatus').textContent='Preparing '+file.name+'…';
    const uploaded=await uploadOne(file);
-   state.assets.push(uploaded);save();renderAssets();
+   state.assets.push(uploaded);save();renderAssets();syncFrameMask();
    $('uploadStatus').textContent='✓ '+file.name+' uploaded'+(Number.isFinite(uploaded.duration)?' · '+timeLabel(uploaded.duration):'')+'. '+(durationWarning(uploaded)||'Ready for Seedance editing.');
   }catch(e){
    $('uploadStatus').textContent='Upload failed: '+e.message;
