@@ -28,9 +28,10 @@ export function videoSwapSettings(input){
    preserveAudio:input.preserveAudio!==false,continuity:input.continuity!==false};
 }
 export function videoFramePrompt(index,custom='',continuity=true){
- const base='Edit Image 1, the ORIGINAL video frame. Replace the ENTIRE main person (face, hair, body, clothes and accessories) with the person from Image 2, the fixed CHARACTER REFERENCE. Keep the original frame camera angle, background, objects, pose, motion moment, lighting and framing. Do not generate a new scene. ';
- const guide=index>1&&continuity?'Image 3 is the PREVIOUS EDITED VIDEO FRAME, used ONLY to keep the replacement character face, hair, clothing, glasses, colours and proportions consistent. Use the movement and pose from Image 1, NOT Image 3. ':'';
- return (base+guide+custom).slice(0,2400);
+ const base='Edit Image 1 (the CURRENT ORIGINAL VIDEO FRAME). Completely remove the original visible person and replace their ENTIRE appearance using Image 2 (the CHARACTER REFERENCE): face, skin details, head, hair, hat, clothing, jacket, body, hands and accessories. Do not leave any traces of the original actor\'s face, clothes, colours or accessories. Match ONLY the original actor\'s pose, expression, head angle, mouth shape, body position, scale and motion instant from Image 1. Preserve the source video\'s background, camera position, perspective, scene, lighting and objects. Do not create a new scene. ';
+ const anchor=index>1?'Image 3 is the LOCKED APPROVED FIRST EDITED FRAME: it shows the correct finished replacement person. It is the PRIMARY visual authority for the new character\'s identity and appearance, including face, hair, clothing and accessories. Match Image 3\'s replacement character exactly, but NEVER copy its pose, motion moment or background: those come ONLY from Image 1. ':'';
+ const previous=index>2&&continuity?'Image 4 is the PREVIOUS EDITED FRAME, a SECONDARY guide for smooth changes from the previous moment. If it disagrees with Image 3 about the correct clothing, face or appearance, ALWAYS follow Image 3. Do not borrow motion or pose from Image 4. ':'';
+ return (base+anchor+previous+custom).slice(0,3200);
 }
 export function frameOutputSize(width,height){
  return width>height?'1536x1024':width<height?'1024x1536':'1024x1024';
@@ -66,6 +67,7 @@ function receipt(job){
  return {id:job.id,status:job.status,error:job.error||'',fps:job.fps,frames:job.frames,
   duration:job.duration,outputSize:job.size,quality:job.quality,model:job.model,
   completedFrames:job.completedFrames||0,paidSubmissions:job.paidSubmissions||0,
+  anchorLocked:!!job.anchorLocked,continuity:job.continuity!==false,
   minOutputOnly:job.minOutputOnly,stage:job.stage||'',sourceHadAudio:job.preserveAudio,
   preview:job.completedFrames>=1?'/api/video-swap/'+job.id+'/preview':null,
   video:job.status==='completed'?'/api/video-swap/'+job.id+'/download':null};
@@ -109,9 +111,17 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
   form.append('quality',job.quality);form.append('size',job.size);form.append('n','1');form.append('output_format','png');
   form.append('image[]',new Blob([base],{type:'image/png'}),'original-frame-'+index+'.png');
   form.append('image[]',new Blob([character.bytes],{type:character.mime}),character.name||'character.png');
-  if(index>1&&job.continuity){
-   const previous=await imageRef(path.join(dir,'edited',frameName(index-1)));
-   form.append('image[]',new Blob([previous],{type:'image/png'}),'previous-edited-frame.png');
+  if(index>1){
+   // The first approved result stays immutable as our master character guide.
+   // We DO NOT use just the preceding frame: that can compound old-subject leakage.
+   const anchor=await imageRef(path.join(dir,'anchor.png'));
+   form.append('image[]',new Blob([anchor],{type:'image/png'}),'locked-first-approved-frame.png');
+   if(index>2&&job.continuity){
+    // Frame 2's previous frame IS the anchor. Don't bill for a duplicate
+    // input. From frame 3 on, include the independently changing last result.
+    const previous=await imageRef(path.join(dir,'edited',frameName(index-1)));
+    form.append('image[]',new Blob([previous],{type:'image/png'}),'previous-edited-frame.png');
+   }
   }
   // Count a possible billable request BEFORE the provider call. A gateway
   // timeout does not prove PiAPI failed to charge; we never automatically retry.
@@ -133,6 +143,12 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    if(status==='completed'){
     const image=getImageResult(data.output||{});
     await writeFile(path.join(dir,'edited',frameName(index)),image,{mode:0o600});
+    if(index===1){
+     // Write-once locked first frame. It is not overwritten as later frames
+     // change, even when the job is resumed after a failed paid edit.
+     await writeFile(path.join(dir,'anchor.png'),image,{flag:'wx',mode:0o600});
+     job.anchorLocked=true;
+    }
     job.currentTask=null;job.completedFrames=index;await save(job);
     return;
    }
@@ -201,6 +217,16 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
   if(!['preview_ready','interrupted','failed'].includes(job.status)||!job.completedFrames)throw Error('Approve the first-frame preview before processing more frames');
   if(job.currentTask)throw Error('A previous PiAPI task may still be running or billed ('+job.currentTask+'). Check its status in PiAPI before resuming.');
   if(job.completedFrames>=job.frames)throw Error('All frames already processed');
+  // Migrate in-progress jobs from before the fixed anchor was introduced.
+  // This is local filesystem work only and cannot spend PiAPI credits.
+  const lockedFile=path.join(folder(job.id),'anchor.png');
+  try{await imageRef(lockedFile);}
+  catch{
+   const approved=await imageRef(path.join(folder(job.id),'edited',frameName(1)));
+   try{await writeFile(lockedFile,approved,{flag:'wx',mode:0o600});}
+   catch(e){if(e.code!=='EEXIST')throw e;}
+  }
+  job.anchorLocked=true;await save(job);
   job.stop=false;job.error='';active=id;await setStatus(job,'running','Processing frame '+(job.completedFrames+1)+' of '+job.frames);
   void (async()=>{try{
    for(let i=job.completedFrames+1;i<=job.frames;i++){
