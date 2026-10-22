@@ -138,7 +138,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    }
    if(['failed','cancelled','canceled'].includes(status)){
     job.currentTask=null;await save(job);
-    throw Error('PiAPI failed on frame +index+': '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
+    throw Error('PiAPI failed on frame '+index+': '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
    }
   }
   throw Error('PiAPI task timed out on frame '+index+'. Task ID '+taskId+'. No automatic paid retry.');
