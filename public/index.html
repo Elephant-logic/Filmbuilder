@@ -34,7 +34,7 @@ const $=id=>document.getElementById(id);
 const cacheKey='framecraft-filmbuilder-v1';
 let state={history:[],assets:[],jobs:[],plan:null};
 try {const old=JSON.parse(localStorage.getItem(cacheKey));if(old&&typeof old==='object')state={...state,...old};} catch {}
-let models=[],busy=false;
+let models=[],busy=false,lastModelSelection=null;
 let maskBuffer=null,maskFrameId=null,maskBaseImage=null,maskTouched=false,maskPainting=false,maskPoint=null;
 function save(){localStorage.setItem(cacheKey,JSON.stringify(state));}
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
@@ -265,6 +265,10 @@ function syncModel(){
  }
  $('boardBadge').textContent=m?m.type:'Choose model';
  $('customWrap').classList.toggle('hide',!m||m.id!=='custom');
+ const isFrameSwap=['nanoframe','nanoframemask'].includes(m?.id);
+ const modelChanged=m?.id!==lastModelSelection;
+ if(isFrameSwap&&modelChanged)$('resolution').value='1K';
+ lastModelSelection=m?.id;
  if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';
  if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
  if(['nanoframe','nanoframemask'].includes(m?.id)){
