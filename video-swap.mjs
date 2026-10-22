@@ -70,7 +70,7 @@ function receipt(job){
   preview:job.completedFrames>=1?'/api/video-swap/'+job.id+'/preview':null,
   video:job.status==='completed'?'/api/video-swap/'+job.id+'/download':null};
 }
-export function createVideoSwapController({storage,asset,piapiKey,provider}){
+export function createVideoSwapController({storage,asset,piapiKey,provider,pollIntervalMs=5000}){
  const jobs=new Map();
  let active=null;
  const folder=id=>path.join(storage,'video-swap-'+id);
@@ -125,7 +125,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider}){
   let response;
   for(let n=0;n<100;n++){
    if(job.stop)throw Error('Cancelled by user. An already-submitted PiAPI task may still be billed');
-   await sleep(5000);
+   await sleep(pollIntervalMs);
    response=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(taskId),
     {headers:{'X-API-Key':piapiKey}},30000);
    const data=response.data?.task_id?response.data:response;
@@ -169,7 +169,9 @@ export function createVideoSwapController({storage,asset,piapiKey,provider}){
     if(!width||!height){const m=/(\d{2,5})x(\d{2,5})/.exec(times);if(m){width=+m[1];height=+m[2];}}
     if(!width||!height){width=16;height=9;}
     job.frames=files.length;job.duration=+duration.toFixed(2);job.size=frameOutputSize(width,height);
-    job.outputWidth=width;job.outputHeight=height;
+    const scale=Math.min(1,1280/Math.max(width,height));
+    job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
+    job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
     job.minOutputOnly=minimumOutputEstimate(files.length,width,height,opts.quality,opts.model);
     await setStatus(job,'ready','Prepared '+job.frames+' frames · no PiAPI charge');
    }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no credits spent');}
