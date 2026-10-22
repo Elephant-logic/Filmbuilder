@@ -4,11 +4,14 @@ import path from 'node:path';
 import {mkdtemp,readFile,writeFile,mkdir,stat,rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController} from './video-swap.mjs';
+import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController} from './video-swap.mjs';
 
 const require=createRequire(import.meta.url);
+assert.equal(MAX_VIDEO_FRAMES,300);
+assert.equal(videoSwapSettings({}).fps,24,'24 fps is the smooth default');
+assert.equal(videoSwapSettings({fps:30}).fps,30,'30 fps phone video setting');
 assert.deepEqual(videoSwapSettings({fps:12,model:'gpt-image-1.5',quality:'low'}).fps,12);
-assert.throws(()=>videoSwapSettings({fps:60}),/8, 12 or 24/);
+assert.throws(()=>videoSwapSettings({fps:60}),/8, 12, 24 or 30/);
 assert.throws(()=>videoSwapSettings({quality:'ultra'}),/quality/);
 assert.throws(()=>videoSwapSettings({model:'unknown'}),/model/);
 assert.match(videoFramePrompt(1),/ORIGINAL video frame/);
@@ -41,10 +44,14 @@ const root=await mkdtemp(path.join(os.tmpdir(),'filmbuilder-video-test-'));
 try{
  const ffmpeg=require('@ffmpeg-installer/ffmpeg').path;
  const vid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',img='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
- const source=path.join(root,vid+'.bin');
- await processFFmpeg(ffmpeg,['-f','lavfi','-i','testsrc2=size=320x180:rate=8',
+ const rotatedId='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+ const source=path.join(root,vid+'.bin'),rotatedSource=path.join(root,rotatedId+'.bin');
+ await processFFmpeg(ffmpeg,['-f','lavfi','-i','testsrc2=size=320x180:rate=30',
   '-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','1',
   '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-f','mp4',source]);
+ // Smartphone-style footage: coded 320x180 landscape pixels with a 90-degree
+ // display rotation flag. Upload metadata wrongly reports landscape.
+ await processFFmpeg(ffmpeg,['-i',source,'-map','0','-c','copy','-metadata:s:v:0','rotate=90','-f','mp4',rotatedSource]);
  let exampleFrame=null;
  const observed=[];
  let seq=0;
@@ -61,6 +68,7 @@ try{
  const controller=createVideoSwapController({storage:root,piapiKey:'fake-key',pollIntervalMs:10,provider,
    asset:async id=>{
     if(id===vid)return {id:vid,mime:'video/mp4',size:(await stat(source)).size,duration:1,width:320,height:180};
+    if(id===rotatedId)return {id:rotatedId,mime:'video/mp4',size:(await stat(rotatedSource)).size,duration:1,width:320,height:180};
     if(id===img){
      const bytes=exampleFrame||Buffer.from([137,80,78,71,13,10,26,10]);
      return {id:img,mime:'image/png',size:bytes.length,name:'character.png',bytes};
@@ -97,5 +105,27 @@ try{
  const output=path.join(root,'video-swap-'+started.id,'result.mp4');
  assert.ok((await stat(output)).size>1000);
  assert.ok(completed.video?.endsWith('/download'));
- console.log('Video character swap: real FFmpeg frame extraction, first-frame paid gate, 3-image continuity, original audio remux and output tests passed');
+ console.log('Video character swap: real FFmpeg extraction, preview approval, continuity and audio remux passed');
+ // Test 30 FPS, a phone-display rotation tag, correct portrait PiAPI output
+ // selection, and final frame dimensions. Metadata still says 320x180!
+ const rotatedStarted=await controller.prepare({videoId:rotatedId,characterId:img,fps:30,model:'gpt-image-1.5',quality:'low',preserveAudio:true,continuity:true});
+ const portrait=await waitFor(controller,rotatedStarted.id,['ready','failed'],20000);
+ assert.equal(portrait.status,'ready',portrait.error);
+ assert.equal(portrait.frames,30);
+ assert.equal(portrait.outputSize,'1024x1536','PiAPI must get portrait settings based on rotated extracted frame');
+ const rotatedHeader=await readFile(path.join(root,'video-swap-'+rotatedStarted.id,'frames','000001.png'));
+ assert.ok(rotatedHeader.readUInt32BE(16)<rotatedHeader.readUInt32BE(20),'FFmpeg extracted upright portrait frame');
+ exampleFrame=rotatedHeader;
+ await controller.preview(rotatedStarted.id);
+ const portraitPreview=await waitFor(controller,rotatedStarted.id,['preview_ready','failed']);
+ assert.equal(portraitPreview.status,'preview_ready',portraitPreview.error);
+ await controller.continueJob(rotatedStarted.id);
+ const portraitComplete=await waitFor(controller,rotatedStarted.id,['completed','failed'],45000);
+ assert.equal(portraitComplete.status,'completed',portraitComplete.error);
+ assert.equal(portraitComplete.completedFrames,30);
+ const finalFirst=path.join(root,'portrait-final-first.png');
+ await processFFmpeg(ffmpeg,['-i',path.join(root,'video-swap-'+rotatedStarted.id,'result.mp4'),'-frames:v','1',finalFirst]);
+ const finalHeader=await readFile(finalFirst);
+ assert.ok(finalHeader.readUInt32BE(16)<finalHeader.readUInt32BE(20),'Rendered MP4 must remain portrait, not become landscape');
+ console.log('Video character swap: 30 FPS and rotated phone-footage portrait extraction/MP4 export tests passed');
 }finally{await rm(root,{recursive:true,force:true});}
