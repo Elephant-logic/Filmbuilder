@@ -92,7 +92,7 @@ try{
  assert.equal(ready.frames,8);
  assert.equal(ready.minOutputOnly,0.104);
  assert.equal(ready.paidSubmissions,0);
- variedVideoFrames=await Promise.all(Array.from({length:8},(_,i)=>readFile(path.join(root,'video-swap-'+started.id,'frames',String(i+1).padStart(6,'0')+'.png')));
+ variedVideoFrames=await Promise.all(Array.from({length:8},(_,i)=>readFile(path.join(root,'video-swap-'+started.id,'frames',String(i+1).padStart(6,'0')+'.png'))));
  exampleFrame=variedVideoFrames[0];
  const previewStarted=await controller.preview(started.id);
  assert.equal(previewStarted.status,'previewing');
