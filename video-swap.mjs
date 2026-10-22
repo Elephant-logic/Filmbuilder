@@ -158,7 +158,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    try{
     // Source duration is checked again against extracted-frame count before ANY paid edit.
     const src=path.join(storage,video.id+'.bin');
-    await runFFmpeg(['-i',src,'-vf','fps='+opts.fps+',scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2','-frames:v',String(MAX_VIDEO_FRAMES+1),path.join(dir,'frames','%06d.png')],90000);
+    await runFFmpeg(['-i',src,'-vf','fps='+opts.fps+',scale=640:640:force_original_aspect_ratio=decrease','-frames:v',String(MAX_VIDEO_FRAMES+1),path.join(dir,'frames','%06d.png')],90000);
     const files=(await readdir(path.join(dir,'frames'))).filter(n=>/^\d{6}\.png$/.test(n)).sort();
     if(!files.length)throw Error('Video had no readable frames');
     if(files.length>MAX_VIDEO_FRAMES)throw Error('Clip has more than '+MAX_VIDEO_FRAMES+' sampled frames. Trim it or choose a lower FPS; no paid requests were made.');
