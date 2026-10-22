@@ -153,7 +153,7 @@ console.log('Nano Banana one-frame and local-mask compositing integration tests 
 
 // PiAPI GPT Image 2.5 uses a DIFFERENT async edit endpoint, FormData image[],
 // a true alpha mask (for Sunburst masked mode), and task polling returning base64.
-const testGptOptions=vm.runInNewContext(source+'; gptFrameOptions',sandbox);
+const testGptOptions=vm.runInNewContext(source+'; gptFrameOptions',{...sandbox});
 const flareOpts=testGptOptions({preset:'gptframeflare',action:'create',prompt:'Swap character',gptQuality:'low',ratio:'9:16'},[{},{}]);
 assert.equal(flareOpts.model,'gpt-image-2.5-flare');
 assert.equal(flareOpts.size,'1024x1536');
