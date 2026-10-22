@@ -137,7 +137,8 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
     return;
    }
    if(['failed','cancelled','canceled'].includes(status)){
-    throw Error('PiAPI failed on frame '+index+': '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
+    job.currentTask=null;await save(job);
+    throw Error('PiAPI failed on frame +index+': '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
    }
   }
   throw Error('PiAPI task timed out on frame '+index+'. Task ID '+taskId+'. No automatic paid retry.');
@@ -145,7 +146,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
  async function prepare(input){
   if(active)throw Error('Another video swap is already processing; finish or cancel it first');
   const opts=videoSwapSettings(input);
-  const video=await asset(input.videoId),character=await asset(input.characterId);
+  const video=await asset(input.videoId,false),character=await asset(input.characterId,false);
   if(!video.mime.startsWith('video/')||!['video/mp4','video/quicktime'].includes(video.mime))throw Error('Upload a source MP4 or MOV');
   if(video.size>100*1024*1024)throw Error('Video too large');
   if(!['image/png','image/jpeg','image/webp'].includes(character.mime)||character.size>IMAGE_LIMIT)throw Error('Upload a JPG, PNG or WebP character reference under 25MB');
