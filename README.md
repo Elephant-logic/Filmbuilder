@@ -89,3 +89,21 @@ The Production Board now includes two options:
 These options **edit one image frame, not a video**. They do not automatically extract all frames from an MP4, keep temporal consistency, or rebuild a movie. Any future full-video workflow must include explicit batch-cost confirmation.
 
 Docs: https://app.piapi.ai/nano-banana-2-1
+
+
+### GPT Image 2.5 Flare and Sunburst — one-frame character editing (PiAPI)
+
+Three presets use your **existing PiAPI API key**:
+
+- **GPT Image 2.5 Flare · Character Replace (Frame)** — lower-latency-oriented image edits, original frame first, replacement character photo second, no mask.
+- **GPT Image 2.5 Sunburst · Character Replace (Frame)** — precision-oriented editing with the same two inputs, no mask.
+- **GPT Image 2.5 Sunburst · Character Replace (Native Mask)** — the same two inputs, plus a painted mask. Filmbuilder produces a native *transparent* PNG alpha mask at original image dimensions (transparent area = editable; opaque outside), submits it as PiAPI's multipart `mask` file along with the two `image[]` files, and retains the original black-and-white paint mask so you can optionally restore original background pixels afterward via **Restore original background · Download masked PNG**.
+
+**These operate on ONE STILL FRAME ONLY.** Select **Create**. Upload **exactly two local JPG/PNG/WEBP images, original first, reference character second**. The app sends them as multipart file fields to `POST https://api.piapi.ai/api/v1/images/edits/async` using `X-API-Key`, *not* the unified PiAPI task endpoint or remote image-URL arrays. It polls `GET /api/v1/task/{id}`, decodes completed base64 image results on the server into a private temporary PNG, and returns only an authenticated same-origin image URL to the browser. No base64 content is saved in browser job history. PiAPI's async task image result may expire after roughly **60 minutes**; local Render files can also disappear after restart.
+
+Output `size` is **1024×1024 for square, 1536×1024 for landscape, and 1024×1536 for portrait**. This can change framing relative to 16:9 or 9:16 originals, so native-mask results and composites should be visually reviewed for shifts. A native mask is *guidance*, not a pixel-perfect editing guarantee. The local composite ensures pixels outside the painted selection come from the uploaded source frame, though edges and alignment can still be imperfect.
+
+Quality is **low, medium, high** (defaults to **low**). Flare and Sunburst have the same published **token rates** (text input $3.75 / million tokens; image input $6.00 / million; image output $22.50 / million), **NOT a fixed per-frame price**. The final cost depends on actual input/output tokens, image sizes, and quality. The app warns before submission, with no automatic retry or paid test.
+
+Official docs: https://piapi.ai/docs/gpt-image/gpt-image-api
+PiAPI walkthrough: https://piapi.ai/blogs/gpt-image-2-5-api-first-call-editing
