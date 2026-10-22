@@ -44,7 +44,7 @@ try{
  const source=path.join(root,vid+'.bin');
  await processFFmpeg(ffmpeg,['-f','lavfi','-i','testsrc2=size=320x180:rate=8',
   '-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','1',
-  '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',source]);
+  '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-f','mp4',source]);
  let exampleFrame=null;
  const observed=[];
  let seq=0;
