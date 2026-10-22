@@ -8,6 +8,9 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --check server.mjs && node public/app-syntax-check.mjs"
+    "test": "npm install --no-audit --no-fund && node --check server.mjs && node --check video-swap.mjs && node public/app-syntax-check.mjs && node video-swap.test.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "1.1.0"
   }
 }
