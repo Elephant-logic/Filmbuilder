@@ -151,6 +151,69 @@ assert.match(page,/compositeMaskedFrame/);
 assert.match(page,/uploadFrameMask/);
 console.log('Nano Banana one-frame and local-mask compositing integration tests passed');
 
+// PiAPI GPT Image 2.5 uses a DIFFERENT async edit endpoint, FormData image[],
+// a true alpha mask (for Sunburst masked mode), and task polling returning base64.
+const testGptOptions=vm.runInNewContext(source+'; gptFrameOptions',sandbox);
+const flareOpts=testGptOptions({preset:'gptframeflare',action:'create',prompt:'Swap character',gptQuality:'low',ratio:'9:16'},[{},{}]);
+assert.equal(flareOpts.model,'gpt-image-2.5-flare');
+assert.equal(flareOpts.size,'1024x1536');
+assert.equal(flareOpts.quality,'low');
+assert.equal(flareOpts.n,1);
+assert.match(flareOpts.prompt,/FIRST image/);
+assert.match(flareOpts.prompt,/SECOND image/);
+const sunOpts=testGptOptions({preset:'gptframesunburst',action:'create',prompt:'Swap character',gptQuality:'high',ratio:'16:9'},[{},{}]);
+assert.equal(sunOpts.model,'gpt-image-2.5-sunburst');
+assert.equal(sunOpts.size,'1536x1024');
+assert.equal(sunOpts.quality,'high');
+assert.throws(()=>testGptOptions({preset:'gptframemask',action:'create',prompt:'Swap',gptQuality:'xhigh'},[{},{}]),/quality/);
+assert.throws(()=>testGptOptions({preset:'gptframemask',action:'edit',prompt:'Swap'},[{},{}]),/Create/);
+assert.throws(()=>testGptOptions({preset:'gptframemask',action:'create',prompt:'Swap'},[{}]),/two local images/);
+
+const mockUploads=new Map([
+ ['base',{id:'base',mime:'image/png',size:8,name:'original-frame.png',bytes:Buffer.from([137,80,78,71,13,10,26,10])}],
+ ['character',{id:'character',mime:'image/jpeg',size:4,name:'character.jpg',bytes:Buffer.from([255,216,255,217])}],
+ ['native-mask',{id:'native-mask',mime:'image/png',size:8,name:'native-mask.png',bytes:Buffer.from([137,80,78,71,13,10,26,10])}]
+]);
+let observed=null;
+const mocks={...sandbox,FormData,Blob,Buffer,PIAPI:'test-key',
+ asset:async id=>{if(!mockUploads.has(id))throw Error('Unknown test upload');return mockUploads.get(id);},
+ provider:async (url,opts)=>{observed={url,opts};return {task_id:'synthetic-task',status:'pending'};}
+};
+const submitGpt=vm.runInNewContext(source+'; submitGPTFrame',mocks);
+const flat=await submitGpt({
+ preset:'gptframeflare',action:'create',prompt:'Change character',gptQuality:'low',ratio:'1:1',attachments:['base','character']
+});
+assert.equal(flat.id,'synthetic-task');
+assert.equal(flat.gptImage,true);
+assert.match(observed.url,/\/api\/v1\/images\/edits\/async$/);
+assert.equal(observed.opts.method,'POST');
+assert.equal(observed.opts.headers['X-API-Key'],'test-key');
+assert.equal(observed.opts.body.get('quality'),'low');
+assert.equal(observed.opts.body.get('size'),'1024x1024');
+assert.equal(observed.opts.body.getAll('image[]').length,2);
+assert.equal(observed.opts.body.getAll('image[]')[0].name,'original-frame.png');
+assert.equal(observed.opts.body.getAll('image[]')[1].name,'character.jpg');
+assert.equal(observed.opts.body.has('mask'),false);
+const masked=await submitGpt({
+ preset:'gptframemask',action:'create',prompt:'Change character',gptQuality:'medium',ratio:'9:16',
+ attachments:['base','character'],nativeMaskId:'native-mask'
+});
+assert.equal(masked.gptImage,true);
+assert.equal(observed.opts.body.get('model'),'gpt-image-2.5-sunburst');
+assert.equal(observed.opts.body.get('quality'),'medium');
+assert.equal(observed.opts.body.get('mask').name,'transparent-edit-mask.png');
+assert.equal(observed.opts.body.getAll('image[]').length,2);
+await assert.rejects(()=>submitGpt({preset:'gptframemask',action:'create',prompt:'Swap',attachments:['base','character']}),/Paint/);
+await assert.rejects(()=>submitGpt({preset:'gptframeflare',action:'create',prompt:'Swap',attachments:['base','character'],urls:[{url:'https://example.com/x.png',type:'image'}]}),/no hosted links/);
+assert.match(server,/gptFrameStatus/);
+assert.match(server,/streamGPTImage/);
+assert.match(server,/b64_json/);
+assert.match(page,/uploadNativeGPTMask/);
+assert.match(page,/id="gptQuality"/);
+assert.match(page,/gptQuality:/);
+assert.match(page,/\?\x27\/api\/gpt-task\/\x27/);
+console.log('GPT Image 2.5 async edit payload, masks, quality, and safe output tests passed');
+
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
 if(!videoCode.startsWith('async function mp4Duration'))throw Error('Video duration parser missing');
 const {open,writeFile,mkdtemp,rm}=await import('node:fs/promises');
