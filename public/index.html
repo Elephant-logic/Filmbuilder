@@ -144,7 +144,7 @@ function syncFrameMask(){
   const scale=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
   const cv=$('frameMaskCanvas');cv.width=Math.max(1,Math.round(img.naturalWidth*scale));cv.height=Math.max(1,Math.round(img.naturalHeight*scale));
   maskBaseImage=img;maskBuffer=document.createElement('canvas');maskBuffer.width=cv.width;maskBuffer.height=cv.height;
-  showFrameMaskPreview();$('frameMaskStatus').textContent=$('model').value==='gptframemask'?'Paint over the subject. GPT will receive a transparent edit mask for this selected area.':'Paint the person in white, including clothing. Clear selection to restart.';
+  showFrameMaskPreview();$('frameMaskStatus').textContent=['gptframemask','gpt15framemask'].includes($('model').value)?'Paint over the subject. GPT will receive a transparent edit mask for this selected area.':'Paint the person in white, including clothing. Clear selection to restart.';
  };
  img.onerror=()=>{$('frameMaskStatus').textContent='Unable to load original frame — upload it again.';};
  img.src='/api/media/'+encodeURIComponent(original.id);
