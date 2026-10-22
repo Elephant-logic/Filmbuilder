@@ -22,7 +22,7 @@
 <div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div>
 <div class="field hide" id="gptQualityWrap"><label>GPT Image edit quality</label><select id="gptQuality"><option value="low">Low · economical test</option><option value="medium">Medium · more detail / higher cost</option><option value="high">High · costly, detailed</option></select><p class="fine warning">GPT Image is TOKEN-PRICED. The exact charge per edit is not fixed or known in advance. Choose Low to test one frame first. Input images and output tokens are billed.</p></div>
 <div class="field hide" id="frameMaskWrap"><label>Paint the person to replace</label>
- <p class="fine">The first uploaded image is your ORIGINAL FRAME. The second is your REPLACEMENT CHARACTER. Paint the person's hair, body and clothing. Outside your brush selection, original pixels will be restored after generation. Nano Banana itself does not support a native mask parameter.</p>
+ <p class="fine">The first uploaded image is your ORIGINAL FRAME. The second is your REPLACEMENT CHARACTER. Paint the person's hair, body and clothing. Outside your brush selection, original pixels will be restored after generation. Nano Banana applies the mask locally; GPT Image Sunburst sends a native transparent edit mask AND restores the background outside the selection after generation.</p>
  <canvas id="frameMaskCanvas" style="display:block;width:100%;max-width:100%;height:auto;background:#111;border:1px solid #53637c;border-radius:10px;touch-action:none;cursor:crosshair"></canvas>
  <div class="duo" style="margin-top:8px"><label>Brush width<input id="frameMaskSize" type="range" min="8" max="200" value="55"></label><button id="frameMaskClear" type="button">Clear selection</button></div>
  <p class="fine" id="frameMaskStatus" aria-live="polite">Upload the original frame first.</p>
@@ -144,7 +144,7 @@ function syncFrameMask(){
   const scale=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
   const cv=$('frameMaskCanvas');cv.width=Math.max(1,Math.round(img.naturalWidth*scale));cv.height=Math.max(1,Math.round(img.naturalHeight*scale));
   maskBaseImage=img;maskBuffer=document.createElement('canvas');maskBuffer.width=cv.width;maskBuffer.height=cv.height;
-  showFrameMaskPreview();$('frameMaskStatus').textContent='Paint the person in white, including clothing. Clear selection to restart.';
+  showFrameMaskPreview();$('frameMaskStatus').textContent=$('model').value==='gptframemask'?'Paint over the subject. GPT will receive a transparent edit mask for this selected area.':'Paint the person in white, including clothing. Clear selection to restart.';
  };
  img.onerror=()=>{$('frameMaskStatus').textContent='Unable to load original frame — upload it again.';};
  img.src='/api/media/'+encodeURIComponent(original.id);
