@@ -40,8 +40,9 @@
   <div class="field"><label>Extra instructions</label><textarea id="vsPrompt" rows="2" placeholder="e.g. blonde hair, purple sunglasses, yellow jacket"></textarea></div>
  </div>
  <label style="display:block;margin:7px 0"><input id="vsSound" type="checkbox" checked> Keep sound from original video</label>
- <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox" checked> Use previous edited frame as consistency guide</label>
- <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. PiAPI charges PER IMAGE EDIT, not per video. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
+ <p class="fine" style="margin:8px 0"><strong>Locked first-frame anchor — always ON.</strong> After you approve the first replacement frame, Filmbuilder saves it as the fixed reference for the character's face, hair and clothing in every later edit. Each new original video frame controls the pose and movement.</p>
+ <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox" checked> Also use previous edited frame as a secondary continuity guide (4 images per edit from frame 3)</label>
+ <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and therefore can raise PiAPI input-token charges. PiAPI charges PER IMAGE EDIT, not per video. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
  <div id="vsJob" class="field" style="margin-top:12px" role="status" aria-live="polite">Upload a video and character image to start.</div>
  <button id="vsPreview" type="button" class="primary hide" style="width:100%">2. Pay for ONE preview frame</button>
@@ -543,6 +544,8 @@ function renderVideoSwapJob(j){
  videoSwapCurrent=j;
  const progress=Number(j.completedFrames||0);
  let status='Status: '+j.status+' · '+(j.stage||'')+'\nFrames: '+(j.frames||'?')+' at '+j.fps+' fps · edited: '+progress+'/'+(j.frames||'?')+' · submitted paid edits: '+(j.paidSubmissions||0)+'.';
+ status+='\nFirst-frame character anchor: '+(j.anchorLocked?'LOCKED from approved frame 1 (kept for all future frames)':'Waiting for successful first-frame preview')+'.';
+ status+='\nLater frames use original frame + character reference + locked first frame'+(j.continuity===false?' (previous-frame guide disabled).':'+ previous edited frame when distinct.');
  if(j.minOutputOnly!=null)status+='\nOutput-image price illustration (LOW GPT 1.5 only): about $'+j.minOutputOnly.toFixed(3)+' across '+j.frames+' frames PLUS all input-image token charges. ACTUAL total is not capped by this figure.';
  else status+='\nPricing is variable per image edit, including input-image charges. No accurate total or upper bound is available from PiAPI before billing.';
  if(j.error)status+='\nERROR: '+j.error;
@@ -582,7 +585,7 @@ async function videoSwapPrepare(){
 async function videoSwapPreview(){
  if(videoSwapBusy||!videoSwapCurrent||videoSwapCurrent.status!=='ready')return;
  const j=videoSwapCurrent;
- if(!confirm('Submit exactly ONE GPT Image edit using your PiAPI credits for the first-frame preview? Output-image pricing is NOT the total charge; image input tokens are charged too. No whole-video edits will be submitted yet.'))return;
+ if(!confirm('Submit exactly ONE GPT Image edit using your PiAPI credits? The first successful frame will be LOCKED as the permanent replacement-character reference for the video. Check it carefully before approving the paid remainder. Input and output tokens cost money.'))return;
  videoSwapBusy=true;
  try{renderVideoSwapJob(await api('/api/video-swap/preview',{id:j.id}));}
  catch(e){alert('First-frame preview failed: '+e.message);}
@@ -593,7 +596,7 @@ async function videoSwapContinue(){
  const j=videoSwapCurrent,remaining=j.frames-j.completedFrames;
  if(remaining<=0)return;
  const expected='RUN '+remaining;
- const confirmed=prompt('WARNING: this will submit '+remaining+' SEPARATE PAID GPT IMAGE EDITS to PiAPI. Your final cost is VARIABLE and can be much higher than the output-only estimate. No charge cap can be guaranteed. Type '+expected+' to approve, or Cancel:', '');
+ const confirmed=prompt('Before spending money: does the locked first replacement frame look RIGHT? This will send '+remaining+' SEPARATE PAID PiAPI IMAGE EDITS. Each uses the original frame, character reference and locked first edited frame, plus the previous frame when enabled. The additional reference images increase input token charges. Final cost is VARIABLE and NOT capped by the displayed output-only estimate. Type '+expected+' to approve, or Cancel:', '');
  if(confirmed!==expected)return;
  videoSwapBusy=true;
  try{renderVideoSwapJob(await api('/api/video-swap/continue',{id:j.id}));}

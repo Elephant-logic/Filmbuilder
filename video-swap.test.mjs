@@ -14,11 +14,16 @@ assert.deepEqual(videoSwapSettings({fps:12,model:'gpt-image-1.5',quality:'low'})
 assert.throws(()=>videoSwapSettings({fps:60}),/8, 12, 24 or 30/);
 assert.throws(()=>videoSwapSettings({quality:'ultra'}),/quality/);
 assert.throws(()=>videoSwapSettings({model:'unknown'}),/model/);
-assert.match(videoFramePrompt(1),/ORIGINAL video frame/);
+assert.match(videoFramePrompt(1),/CURRENT ORIGINAL VIDEO FRAME/);
 assert.doesNotMatch(videoFramePrompt(1),/Image 3/);
-assert.match(videoFramePrompt(2),/Image 3/);
-assert.match(videoFramePrompt(2),/NOT Image 3/);
-assert.doesNotMatch(videoFramePrompt(2,'',false),/Image 3/);
+assert.match(videoFramePrompt(2),/Image 3 is the LOCKED APPROVED FIRST EDITED FRAME/);
+assert.match(videoFramePrompt(2),/PRIMARY visual authority/);
+assert.doesNotMatch(videoFramePrompt(2),/Image 4/,'frame 2 must not reference duplicate previous=anchor');
+assert.match(videoFramePrompt(3),/Image 4 is the PREVIOUS EDITED FRAME/);
+assert.match(videoFramePrompt(3),/ALWAYS follow Image 3/);
+assert.match(videoFramePrompt(3),/NEVER copy its pose/);
+assert.match(videoFramePrompt(3,'',false),/Image 3 is the LOCKED/);
+assert.doesNotMatch(videoFramePrompt(3,'',false),/Image 4/);
 assert.equal(frameOutputSize(1920,1080),'1536x1024');
 assert.equal(frameOutputSize(1080,1920),'1024x1536');
 assert.equal(minimumOutputEstimate(8,1920,1080,'low','gpt-image-1.5'),0.104);
@@ -55,15 +60,20 @@ try{
  let exampleFrame=null;
  const observed=[];
  let seq=0;
+ let variedVideoFrames=[];
  const provider=async(url,opts)=>{
   if(opts.method==='POST'){
    const files=opts.body.getAll('image[]');
-   observed.push({files:files.length,prompt:opts.body.get('prompt'),model:opts.body.get('model'),quality:opts.body.get('quality')});
+   observed.push({files:files.length,prompt:opts.body.get('prompt'),model:opts.body.get('model'),quality:opts.body.get('quality'),
+     filenames:files.map(f=>f.name),images:await Promise.all(files.map(async f=>Buffer.from(await f.arrayBuffer()))) });
    const id='mock-task-'+(++seq);
    return {task_id:id,status:'pending'};
   }
   if(!exampleFrame)throw Error('No frame for mocked PiAPI image result');
-  return {data:{status:'completed',output:{data:[{b64_json:exampleFrame.toString('base64')}]}}};
+  // Each mocked result is a different REAL video PNG so we can prove the
+  // golden anchor never changes even as the previous frame does.
+  const output=seq<=variedVideoFrames.length?variedVideoFrames[seq-1]:exampleFrame;
+  return {data:{status:'completed',output:{data:[{b64_json:output.toString('base64')}]}}};
  };
  const controller=createVideoSwapController({storage:root,piapiKey:'fake-key',pollIntervalMs:10,provider,
    asset:async id=>{
@@ -82,15 +92,18 @@ try{
  assert.equal(ready.frames,8);
  assert.equal(ready.minOutputOnly,0.104);
  assert.equal(ready.paidSubmissions,0);
- exampleFrame=await readFile(path.join(root,'video-swap-'+started.id,'frames','000001.png'));
+ variedVideoFrames=await Promise.all(Array.from({length:8},(_,i)=>readFile(path.join(root,'video-swap-'+started.id,'frames',String(i+1).padStart(6,'0')+'.png'))));
+ exampleFrame=variedVideoFrames[0];
  const previewStarted=await controller.preview(started.id);
  assert.equal(previewStarted.status,'previewing');
  const preview=await waitFor(controller,started.id,['preview_ready','failed']);
  assert.equal(preview.status,'preview_ready',preview.error);
  assert.equal(preview.completedFrames,1);
  assert.equal(preview.paidSubmissions,1);
+ assert.equal(preview.anchorLocked,true,'First approved image is saved permanently as locked anchor');
+ assert.deepEqual(await readFile(path.join(root,'video-swap-'+started.id,'anchor.png')),variedVideoFrames[0]);
  assert.equal(observed[0].files,2,'Preview uses source frame plus character ref only');
- assert.match(observed[0].prompt,/ORIGINAL video frame/);
+ assert.match(observed[0].prompt,/CURRENT ORIGINAL VIDEO FRAME/);
  assert.ok(!observed[0].prompt.includes('Image 3'));
  const fakeRes={headers:null,body:null,writeHead(code,headers){this.headers={code,...headers};},end(data){this.body=data;}};
  const approval=await controller.continueJob(started.id);
@@ -100,8 +113,18 @@ try{
  assert.equal(completed.completedFrames,8);
  assert.equal(completed.paidSubmissions,8);
  assert.equal(observed.length,8);
- assert.equal(observed[1].files,3,'Continuity uses original + character + prior edited frame');
- assert.match(observed[1].prompt,/Image 3/);
+ assert.equal(observed[1].files,3,'Frame 2 uses original, character, and locked anchor (without duplicate)');
+ assert.deepEqual(observed[1].filenames,['original-frame-2.png','character.png','locked-first-approved-frame.png']);
+ assert.deepEqual(observed[1].images[2],variedVideoFrames[0],'Frame 2 locked anchor must equal approved first result');
+ assert.match(observed[1].prompt,/Image 3 is the LOCKED APPROVED FIRST EDITED FRAME/);
+ assert.equal(observed[2].files,4,'Frame 3 onwards must use original + character + locked first + previous');
+ assert.deepEqual(observed[2].filenames,['original-frame-3.png','character.png','locked-first-approved-frame.png','previous-edited-frame.png']);
+ assert.deepEqual(observed[2].images[2],variedVideoFrames[0],'Anchor remains the FIRST edited frame');
+ assert.deepEqual(observed[2].images[3],variedVideoFrames[1],'Previous frame is independently updated');
+ assert.notDeepEqual(observed[2].images[2],observed[2].images[3],'Anchor should not drift with the last frame');
+ assert.match(observed[2].prompt,/Image 4 is the PREVIOUS EDITED FRAME/);
+ assert.deepEqual(observed.at(-1).images[2],variedVideoFrames[0],'Even the final edit references the first result');
+ assert.deepEqual(await readFile(path.join(root,'video-swap-'+started.id,'anchor.png')),variedVideoFrames[0],'Locked anchor file remains unchanged');
  const output=path.join(root,'video-swap-'+started.id,'result.mp4');
  assert.ok((await stat(output)).size>1000);
  assert.ok(completed.video?.endsWith('/download'));
