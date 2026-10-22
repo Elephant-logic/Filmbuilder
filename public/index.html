@@ -20,8 +20,9 @@
 <section class="workspace" id="workspace"><div class="row" id="boardToggle"><h2>Production board</h2><span class="badge" id="boardBadge">Image + Video</span></div>
 <div class="group"><h3>Reference material</h3><label class="upload">＋ Upload photos, MP4/MOV videos or audio (up to 100 MB each)<input id="upload" type="file" multiple accept="image/*,video/*,audio/*,.mp4,.mov"></label><p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p><div class="assets" id="assets"></div><p class="fine warning">Seedance 2.5 editing needs a 4–30 second source video. If yours is longer: Samsung Gallery → open video → pencil/Edit → trim to around 8–12 seconds → Save as copy → upload the trimmed version.</p><p class="fine">GPT can inspect uploaded images. Filmbuilder automatically hosts references when generating. Tap Get URL to copy a temporary HTTPS link: PiAPI hosting lasts up to 24 hours for eligible small files; otherwise Render links last up to 6 hours and can disappear after restart. Anyone holding a link can access that file.</p><div class="field"><label>Additional hosted HTTPS reference URLs (one per line)</label><textarea id="references" rows="2" placeholder="https://example.com/reference.mp4"></textarea></div></div>
 <div class="group"><h3>Creative controls</h3><div class="field"><label>PiAPI model</label><select id="model"></select><p class="fine" id="modelHint" role="status"></p></div><div class="field"><label>Production prompt</label><textarea id="prompt" rows="6" placeholder="GPT will create an editable production prompt here…"></textarea></div>
+<div class="field hide" id="gptQualityWrap"><label>GPT Image edit quality</label><select id="gptQuality"><option value="low">Low · economical test</option><option value="medium">Medium · more detail / higher cost</option><option value="high">High · costly, detailed</option></select><p class="fine warning">GPT Image is TOKEN-PRICED. The exact charge per edit is not fixed or known in advance. Choose Low to test one frame first. Input images and output tokens are billed.</p></div>
 <div class="field hide" id="frameMaskWrap"><label>Paint the person to replace</label>
- <p class="fine">The first uploaded image is your ORIGINAL FRAME. The second is your REPLACEMENT CHARACTER. Paint the person's hair, body and clothing. Outside your brush selection, original pixels will be restored after generation. Nano Banana itself does not support a native mask parameter.</p>
+ <p class="fine">The first uploaded image is your ORIGINAL FRAME. The second is your REPLACEMENT CHARACTER. Paint the person's hair, body and clothing. Outside your brush selection, original pixels will be restored after generation. Nano Banana applies the mask locally; GPT Image Sunburst sends a native transparent edit mask AND restores the background outside the selection after generation.</p>
  <canvas id="frameMaskCanvas" style="display:block;width:100%;max-width:100%;height:auto;background:#111;border:1px solid #53637c;border-radius:10px;touch-action:none;cursor:crosshair"></canvas>
  <div class="duo" style="margin-top:8px"><label>Brush width<input id="frameMaskSize" type="range" min="8" max="200" value="55"></label><button id="frameMaskClear" type="button">Clear selection</button></div>
  <p class="fine" id="frameMaskStatus" aria-live="polite">Upload the original frame first.</p>
@@ -130,7 +131,7 @@ function showFrameMaskPreview(){
  g.save();g.globalAlpha=.45;g.drawImage(maskBuffer,0,0);g.restore();
 }
 function syncFrameMask(){
- const active=$('model').value==='nanoframemask';
+ const active=['nanoframemask','gptframemask'].includes($('model').value);
  $('frameMaskWrap').classList.toggle('hide',!active);
  if(!active)return;
  const original=state.assets.find(a=>a.mime?.startsWith('image/'));
@@ -143,7 +144,7 @@ function syncFrameMask(){
   const scale=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
   const cv=$('frameMaskCanvas');cv.width=Math.max(1,Math.round(img.naturalWidth*scale));cv.height=Math.max(1,Math.round(img.naturalHeight*scale));
   maskBaseImage=img;maskBuffer=document.createElement('canvas');maskBuffer.width=cv.width;maskBuffer.height=cv.height;
-  showFrameMaskPreview();$('frameMaskStatus').textContent='Paint the person in white, including clothing. Clear selection to restart.';
+  showFrameMaskPreview();$('frameMaskStatus').textContent=$('model').value==='gptframemask'?'Paint over the subject. GPT will receive a transparent edit mask for this selected area.':'Paint the person in white, including clothing. Clear selection to restart.';
  };
  img.onerror=()=>{$('frameMaskStatus').textContent='Unable to load original frame — upload it again.';};
  img.src='/api/media/'+encodeURIComponent(original.id);
@@ -182,7 +183,7 @@ async function imageForMaskComposite(url){
 async function compositeMaskedFrame(job){
  if(!job.frameMask)throw Error('Missing mask job metadata');
  const original=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.baseId));
- const edited=await imageForMaskComposite('/api/job-image/'+encodeURIComponent(job.id));
+ const edited=await imageForMaskComposite((job.gptImage?'/api/gpt-image/':'/api/job-image/')+encodeURIComponent(job.id));
  const mask=await imageForMaskComposite('/api/media/'+encodeURIComponent(job.frameMask.maskId));
  const scale=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
  const w=Math.max(1,Math.round(original.naturalWidth*scale)),height=Math.max(1,Math.round(original.naturalHeight*scale));
@@ -202,6 +203,18 @@ async function compositeMaskedFrame(job){
  const blob=await new Promise(resolve=>target.toBlob(resolve,'image/png'));
  if(!blob)throw Error('Could not export PNG image');
  return URL.createObjectURL(blob);
+}
+async function uploadNativeGPTMask(){
+ if(!maskBuffer||!maskTouched||!maskBaseImage)throw Error('Paint the person first to create a GPT transparency mask.');
+ const w=maskBaseImage.naturalWidth,h=maskBaseImage.naturalHeight;
+ if(w>4096||h>4096)throw Error('GPT native-mask preparation is limited to source images 4096 pixels or smaller on each side.');
+ const cv=document.createElement('canvas');cv.width=w;cv.height=h;const g=cv.getContext('2d');
+ g.fillStyle='#fff';g.fillRect(0,0,w,h);
+ g.globalCompositeOperation='destination-out';g.drawImage(maskBuffer,0,0,w,h);
+ const blob=await new Promise(resolve=>cv.toBlob(resolve,'image/png'));
+ if(!blob)throw Error('Could not export GPT native alpha mask');
+ if(blob.size>25*1024*1024)throw Error('GPT mask is over 25MB, try a smaller source frame.');
+ return await uploadOne(new File([blob],'gpt-native-mask.png',{type:'image/png'}));
 }
 function renderJobs(){const box=$('jobs');box.textContent='';if(!state.jobs.length){box.textContent='No jobs submitted.';return;}state.jobs.forEach(j=>{const n=el('div','job');n.append(el('div','tag',j.model+' • '+j.id));n.append(el('div','',j.status||'submitted'));if(j.error)n.append(el('div','warning',j.error));
  if(j.frameMask&&(j.media||[]).some(m=>m.type==='image')&&String(j.status).toLowerCase()==='completed'){
@@ -271,7 +284,16 @@ function syncModel(){
  lastModelSelection=m?.id;
  if(m?.type==='image'&&$('resolution').value.endsWith('p'))$('resolution').value='2K';
  if(m?.type==='video'&&$('resolution').value.endsWith('K'))$('resolution').value='720p';
- if(['nanoframe','nanoframemask'].includes(m?.id)){
+ const isGPTFrame=['gptframeflare','gptframesunburst','gptframemask'].includes(m?.id);
+ $('gptQualityWrap').classList.toggle('hide',!isGPTFrame);
+ $('resolution').disabled=!!isGPTFrame;
+ $('resolution').title=isGPTFrame?'GPT Image uses 1024×1024, 1536×1024 or 1024×1536 based on orientation, not the 1K/2K/4K selector.':'Image/video resolution';
+ if(isGPTFrame){
+  $('action').value='create';
+  $('resolution').value='1K';
+  if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value))$('ratio').value='9:16';
+  if(!$('prompt').value.trim())$('prompt').value='Replace only the original actor with the full character shown in the second image. Match the person original pose and position. Preserve the untouched background, composition, lighting and props.';
+ }else if(['nanoframe','nanoframemask'].includes(m?.id)){
   $('action').value='create';
   if(!['1K','2K','4K'].includes($('resolution').value))$('resolution').value='1K';
   if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value))$('ratio').value='9:16';
@@ -297,6 +319,10 @@ function syncModel(){
  $('audioLabel').textContent=['klingo1edit','kling3omni'].includes(m?.id)?'Keep original video audio':'Request generated audio (supported models)';
  syncFrameMask();
  const descriptions={
+  gptframeflare:'GPT IMAGE 2.5 FLARE · SINGLE IMAGE FRAME. Upload the ORIGINAL FRAME first and the REPLACEMENT CHARACTER second. Uses PiAPI dedicated async image edit API. No mask. Token-priced; low quality for affordable first test. This is NOT a whole-video edit.',
+  gptframesunburst:'GPT IMAGE 2.5 SUNBURST · SINGLE IMAGE FRAME. Two images in order: ORIGINAL FRAME first, CHARACTER reference second. Precision-oriented model. No mask. Token-priced (not $0.03 flat) and may still modify scenery.',
+  gptframemask:'GPT IMAGE 2.5 SUNBURST · NATIVE MASK · SINGLE FRAME. Upload ORIGINAL FRAME first, CHARACTER second, and paint the person. The app sends a transparent PNG mask to PiAPI (transparent = editable region), then lets you restore the original background outside your selection. GPT editing may still modify content within the selection. Token-priced.',
+
   nanoframe:'SINGLE FRAME only. Upload 2 images in order: original video FRAME first, replacement CHARACTER second. No masking. Nano Banana 2.1 costs $0.03 at 1K, $0.04 at 2K, or $0.09 at 4K per image generation.',
   nanoframemask:'SINGLE FRAME only. Upload ORIGINAL FRAME first and CHARACTER image second, then paint the person. Nano Banana has no native mask input: after generation the app composites edited subject pixels over the original outside the mask. 1K $0.03, 2K $0.04, 4K $0.09 per image generation.',
   klingmotion:'Full-character motion transfer: upload one fictional character image plus one source motion video. PiAPI renders a new video; it does not preserve every pixel of the original background. Select Create.',
@@ -339,6 +365,14 @@ async function generate(){
  }
  if(choice.id.startsWith('seedance')&&!['480p','720p','1080p'].includes($('resolution').value)){
   $('resolution').value='720p';
+ }
+ if(['gptframeflare','gptframesunburst','gptframemask'].includes(choice.id)){
+  const imgs=state.assets.filter(a=>a.mime?.startsWith('image/'));
+  if(action!=='create'){alert('GPT edits ONE IMAGE FRAME. Choose Create, not Edit existing video.');$('action').value='create';return;}
+  if(state.assets.length!==2||imgs.length!==2||hosted.length){alert('GPT Frame Edit requires exactly TWO local images in order: original frame first, replacement character second. Remove other uploads and hosted URLs.');return;}
+  if(!['low','medium','high'].includes($('gptQuality').value)){alert('Select low, medium or high GPT edit quality.');return;}
+  if(!['16:9','9:16','1:1','4:3','3:4'].includes($('ratio').value)){alert('Select a supported output orientation.');return;}
+  if(choice.id==='gptframemask'&&(!maskBuffer||!maskTouched)){alert('Paint the original person on the mask canvas first.');return;}
  }
  if(['nanoframe','nanoframemask'].includes(choice.id)){
   const imgs=state.assets.filter(a=>a.mime?.startsWith('image/'));
@@ -408,23 +442,25 @@ async function generate(){
  let custom=null;
  try{if(choice.id==='custom')custom=JSON.parse($('custom').value);}catch{alert('Custom task JSON is invalid.');return;}
  const o1Price=choice.id==='klingo1edit'?'\nExperimental reference-video editing. The output length follows your source video. PiAPI may reject this workflow; check its live availability and actual edit price before approving a charge.':choice.id==='kling3omni'?'\nNOT A CHARACTER SWAP. This generates a NEW video from references and may completely change the source scene. Published 720p base price without generated audio for '+Number($('duration').value)+'s is $'+(Number($('duration').value)*($('resolution').value==='1080p'?0.15:0.1)).toFixed(2)+'. Check actual video reference billing. Full background preservation is NOT guaranteed.':' ';
+ const gptCost=['gptframeflare','gptframesunburst','gptframemask'].includes(choice.id)?'\nONE FRAME only (NOT a video). GPT Image 2.5 uses variable TOKEN-BASED billing, NOT a fixed $0.03 per frame. Quality: '+$('gptQuality').value+'. PiAPI charges input image tokens and generated output tokens. No exact final price estimate. Output size may crop or recompose the input.': '';
  const frameCost=['nanoframe','nanoframemask'].includes(choice.id)?'\nONE IMAGE FRAME only, not an entire video. PiAPI price per generation: $'+({'1K':'0.03','2K':'0.04','4K':'0.09'}[$('resolution').value]||'0.03')+(choice.id==='nanoframemask'?'. The app applies your mask AFTER image generation and restores the original pixels outside it; Nano Banana itself has no native mask.':'.'):'';
- const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+frameCost+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
+ const confirmation='Generate using '+choice.name+'?'+(action==='edit'?'\nOperation: Edit existing video':'\nOperation: '+action)+o1Price+frameCost+gptCost+'\nPiAPI may charge real credits.'+(['videoswap','klingmotion','klingo1edit','kling3omni'].includes(choice.id)?'\nConfirm you own or have permission to use the source video and character likeness.':'');
  if(!confirm(confirmation))return;
  busy=true;$('generate').disabled=true;$('generate').textContent='Submitting…';
  try{
   const removed=await verifyAssets();
   if(removed)throw Error('Some reference files expired after a server restart. Upload them again before spending credits.');
-  let maskUpload=null;
-  if(choice.id==='nanoframemask')maskUpload=await uploadFrameMask();
-  const r=await api('/api/generate',{preset:choice.id,prompt,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls:hosted,custom});
+  let maskUpload=null,nativeMaskUpload=null;
+  if(['nanoframemask','gptframemask'].includes(choice.id))maskUpload=await uploadFrameMask();
+  if(choice.id==='gptframemask')nativeMaskUpload=await uploadNativeGPTMask();
+  const r=await api('/api/generate',{preset:choice.id,prompt,ratio:$('ratio').value,resolution:$('resolution').value,duration:Number($('duration').value),action,audio:$('audio').checked,attachments:state.assets.map(a=>a.id),urls:hosted,custom,gptQuality:$('gptQuality').value,nativeMaskId:nativeMaskUpload?.id});
   if(maskUpload)r.frameMask={baseId:state.assets[0].id,maskId:maskUpload.id};
   if(!r.id)throw Error('Task ID missing. Check PiAPI history before retrying to avoid duplicate charges.');
   state.jobs.unshift(r);save();renderJobs();$('jobsBox').scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){alert('Generation error: '+e.message);}
  finally{busy=false;$('generate').disabled=false;$('generate').textContent='▶ Generate with PiAPI';}
 }
-async function poll(){for(const j of state.jobs.slice(0,8)){if(!j.id||['completed','failed','success','cancelled'].includes(String(j.status).toLowerCase()))continue;try{const r=await api('/api/task/'+encodeURIComponent(j.id));Object.assign(j,r);}catch(e){j.error=e.message;}}save();renderJobs();}
+async function poll(){for(const j of state.jobs.slice(0,8)){if(!j.id||['completed','failed','success','cancelled'].includes(String(j.status).toLowerCase()))continue;try{const r=await api((j.gptImage?'/api/gpt-task/':'/api/task/')+encodeURIComponent(j.id));Object.assign(j,r);}catch(e){j.error=e.message;}}save();renderJobs();}
 function uploadOne(file){
  return new Promise((resolve,reject)=>{
   const xhr=new XMLHttpRequest();
