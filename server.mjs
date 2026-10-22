@@ -3,6 +3,7 @@ import { readFile,writeFile,mkdir,open,unlink,stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { randomUUID,randomBytes,createHmac,timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import { createVideoSwapController } from './video-swap.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
@@ -538,6 +539,7 @@ async function proxyGeneratedImage(res,id){
  res.end(Buffer.concat(chunks));
 }
 async function status(id){if(!PIAPI)throw bad('PiAPI key missing');if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw bad('Invalid task id');const r=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(id),{headers:{'X-API-Key':PIAPI}});return {id,status:r.data?.status,media:outputMedia(r.data?.output),error:r.data?.error?.message||'',raw:r.data||{}};}
+const videoSwap=createVideoSwapController({storage:STORAGE,asset:async id=>await asset(id,true),piapiKey:PIAPI,provider});
 const LOGIN='<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Framecraft • Sign in</title><style>body{font:16px system-ui;background:#0c101b;color:#fff;min-height:100vh;display:grid;place-items:center;margin:0}main{background:#1a2234;border:1px solid #384057;padding:32px;border-radius:18px;width:min(380px,85vw)}input,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border-radius:10px;font-size:16px}input{background:#0d1322;color:#fff;border:1px solid #58647d}button{background:#7a9aff;border:0;color:#0a172c;font-weight:bold}p{color:#aebbd1}</style><main><h1>Framecraft Studio</h1><p>Private GPT + PiAPI filmmaking workspace</p><form method="POST" action="/auth/login"><input type="password" name="password" placeholder="Studio password" required><button>Sign in</button></form></main></html>';
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');const route=new URL(req.url||'/', 'http://localhost').pathname;try{
 if(req.method==='GET'&&route==='/api/health')return send(res,200,{ok:true,configured:!!PASSWORD});
@@ -575,6 +577,12 @@ if(req.method==='POST'&&route==='/auth/login'){
 if(!authenticated(req)){if(req.method==='GET'&&!route.startsWith('/api/'))return go(res,'/login');return send(res,401,{error:'Sign in first. Set APP_PASSWORD in Render environment.'});}
 if(req.method==='GET'&&route==='/'){const html=await readFile(path.join(ROOT,'public/index.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'"});return res.end(html);}
 if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,piapi:!!PIAPI,demo:DEMO,models:PRESETS});
+if(req.method==='GET'&&route.startsWith('/api/video-swap/')){
+ const bits=route.slice('/api/video-swap/'.length).split('/');
+ if(bits.length===1)return send(res,200,await videoSwap.status(bits[0]));
+ if(bits.length===2&&['preview','download'].includes(bits[1]))return await videoSwap.stream(bits[0],bits[1],res);
+ throw bad('Unknown video-swap resource',404);
+}
 if(req.method==='GET'&&route.startsWith('/api/media/'))return await streamMedia(req,res,route.split('/').pop());
 if(req.method==='GET'&&route==='/api/assets/status'){
  const ids=(new URL(req.url||'/', 'http://localhost').searchParams.get('ids')||'').split(',').filter(Boolean).slice(0,50);
@@ -599,6 +607,10 @@ if(route==='/api/upload')return send(res,200,await upload(await json(req)));
 if(route==='/api/upload-file')return send(res,200,await uploadBinary(req));
 if(route==='/api/host'){const b=await json(req);if(typeof b?.id!=='string')throw bad('Provide an uploaded file ID');return send(res,200,await hostedReference(b.id));}
 if(route==='/api/chat')return send(res,200,await chat(await json(req)));
+if(route==='/api/video-swap/prepare')return send(res,200,await videoSwap.prepare(await json(req)));
+if(route==='/api/video-swap/preview'){if(!PIAPI)throw bad('PiAPI key missing',503);const b=await json(req);return send(res,200,await videoSwap.preview(b.id));}
+if(route==='/api/video-swap/continue'){if(!PIAPI)throw bad('PiAPI key missing',503);const b=await json(req);return send(res,200,await videoSwap.continueJob(b.id));}
+if(route==='/api/video-swap/cancel'){const b=await json(req);return send(res,200,await videoSwap.cancel(b.id));}
 if(route==='/api/generate')return send(res,200,await generate(await json(req)));
 return send(res,404,{error:'Not found'});
 }catch(e){if((e.status||500)>=500)console.error(e);return send(res,e.status||500,{error:String(e.message||'Unexpected error').slice(0,500)});}
