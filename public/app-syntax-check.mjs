@@ -145,7 +145,7 @@ for(const mode of ['nanoframe','nanoframemask']){
  assert.throws(()=>task({preset:mode,action:'create',prompt:'replace',resolution:'1080p'},frameRefs),/resolution/);
 }
 assert.match(server,/proxyGeneratedImage/);
-assert.match(server,/image\.png/);
+assert.match(server,/image\\/png/);
 assert.match(page,/id="frameMaskCanvas"/);
 assert.match(page,/compositeMaskedFrame/);
 assert.match(page,/uploadFrameMask/);
