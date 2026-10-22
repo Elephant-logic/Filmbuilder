@@ -161,6 +161,20 @@ assert.equal(flareOpts.quality,'low');
 assert.equal(flareOpts.n,1);
 assert.match(flareOpts.prompt,/FIRST image/);
 assert.match(flareOpts.prompt,/SECOND image/);
+for(const mode of ['gpt15frame','gpt15framemask']){
+ const o=testGptOptions({preset:mode,action:'create',prompt:'Replace performer',gptQuality:'low',ratio:'1:1'},[{},{}]);
+ assert.equal(o.model,'gpt-image-1.5',mode+' should use the correct PiAPI model');
+ assert.equal(o.quality,'low');
+ assert.equal(o.size,'1024x1024');
+ assert.equal(o.n,1);
+ assert.match(o.prompt,/FIRST image/);
+ assert.match(o.prompt,/SECOND image/);
+ const portrait=testGptOptions({preset:mode,action:'create',prompt:'Replace performer',gptQuality:'medium',ratio:'9:16'},[{},{}]);
+ assert.equal(portrait.size,'1024x1536');
+ assert.equal(portrait.quality,'medium');
+ assert.throws(()=>testGptOptions({preset:mode,action:'edit',prompt:'Swap',ratio:'1:1'},[{},{}]),/Create/);
+ assert.throws(()=>testGptOptions({preset:mode,action:'create',prompt:'Swap',ratio:'1:1'},[{}]),/two local images/);
+}
 const sunOpts=testGptOptions({preset:'gptframesunburst',action:'create',prompt:'Swap character',gptQuality:'high',ratio:'16:9'},[{},{}]);
 assert.equal(sunOpts.model,'gpt-image-2.5-sunburst');
 assert.equal(sunOpts.size,'1536x1024');
@@ -203,6 +217,26 @@ assert.equal(observed.opts.body.get('model'),'gpt-image-2.5-sunburst');
 assert.equal(observed.opts.body.get('quality'),'medium');
 assert.equal(observed.opts.body.get('mask').name,'transparent-edit-mask.png');
 assert.equal(observed.opts.body.getAll('image[]').length,2);
+const newBasic=await submitGpt({
+ preset:'gpt15frame',action:'create',prompt:'Change whole person',gptQuality:'low',ratio:'1:1',attachments:['base','character']
+});
+assert.equal(newBasic.gptImage,true);
+assert.equal(observed.opts.body.get('model'),'gpt-image-1.5');
+assert.equal(observed.opts.body.get('quality'),'low');
+assert.equal(observed.opts.body.getAll('image[]').length,2);
+assert.equal(observed.opts.body.has('mask'),false);
+const newMasked=await submitGpt({
+ preset:'gpt15framemask',action:'create',prompt:'Change whole person',gptQuality:'medium',ratio:'9:16',
+ attachments:['base','character'],nativeMaskId:'native-mask'
+});
+assert.equal(newMasked.gptImage,true);
+assert.equal(observed.opts.body.get('model'),'gpt-image-1.5');
+assert.equal(observed.opts.body.get('quality'),'medium');
+assert.equal(observed.opts.body.getAll('image[]').length,2);
+assert.equal(observed.opts.body.get('mask').name,'transparent-edit-mask.png');
+await assert.rejects(()=>submitGpt({preset:'gpt15framemask',action:'create',prompt:'Swap',attachments:['base','character']}),/Paint/);
+assert.match(page,/gpt15framemask/);
+assert.match(page,/0\.009/);
 await assert.rejects(()=>submitGpt({preset:'gptframemask',action:'create',prompt:'Swap',attachments:['base','character']}),/Paint/);
 await assert.rejects(()=>submitGpt({preset:'gptframeflare',action:'create',prompt:'Swap',attachments:['base','character'],urls:[{url:'https://example.com/x.png',type:'image'}]}),/no hosted links/);
 assert.match(server,/gptFrameStatus/);
