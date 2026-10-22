@@ -9,9 +9,9 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 
 const require=createRequire(import.meta.url);
-export const MAX_VIDEO_FRAMES=240;
+export const MAX_VIDEO_FRAMES=300;
 export const MAX_VIDEO_SECONDS=10;
-export const ALLOWED_FPS=[8,12,24];
+export const ALLOWED_FPS=[8,12,24,30];
 export const VIDEO_MODELS=['gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'];
 export const VIDEO_QUALITIES=['low','medium','high'];
 const PNG_MAGIC=Buffer.from([137,80,78,71,13,10,26,10]);
@@ -20,8 +20,8 @@ const STARTING_OUTPUT_LOW={square:0.009,landscape:0.013,portrait:0.013};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 export function videoSwapSettings(input){
- const fps=Number(input.fps||8),quality=String(input.quality||'low'),model=String(input.model||'gpt-image-1.5');
- if(!ALLOWED_FPS.includes(fps))throw Error('Choose 8, 12 or 24 output frames per second');
+ const fps=Number(input.fps||24),quality=String(input.quality||'low'),model=String(input.model||'gpt-image-1.5');
+ if(!ALLOWED_FPS.includes(fps))throw Error('Choose 8, 12, 24 or 30 output frames per second');
  if(!VIDEO_MODELS.includes(model))throw Error('Unsupported GPT Image video-swap model');
  if(!VIDEO_QUALITIES.includes(quality))throw Error('Choose low, medium or high image quality');
  return {fps,quality,model,prompt:String(input.prompt||'').slice(0,1600),
@@ -158,19 +158,23 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    try{
     // Source duration is checked again against extracted-frame count before ANY paid edit.
     const src=path.join(storage,video.id+'.bin');
-    const times=await runFFmpeg(['-i',src,'-vf','fps='+opts.fps+',scale=640:-2','-frames:v',String(MAX_VIDEO_FRAMES+1),path.join(dir,'frames','%06d.png')],90000);
+    await runFFmpeg(['-i',src,'-vf','fps='+opts.fps+',scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2','-frames:v',String(MAX_VIDEO_FRAMES+1),path.join(dir,'frames','%06d.png')],90000);
     const files=(await readdir(path.join(dir,'frames'))).filter(n=>/^\d{6}\.png$/.test(n)).sort();
     if(!files.length)throw Error('Video had no readable frames');
-    if(files.length>MAX_VIDEO_FRAMES)throw Error('Clip has more than 240 sampled frames. Trim it or choose a lower FPS; no paid requests were made.');
+    if(files.length>MAX_VIDEO_FRAMES)throw Error('Clip has more than '+MAX_VIDEO_FRAMES+' sampled frames. Trim it or choose a lower FPS; no paid requests were made.');
     let duration=video.duration;
     if(!Number.isFinite(duration)||duration<=0)duration=files.length/opts.fps;
     if(duration>MAX_VIDEO_SECONDS+0.25)throw Error('Trim the video to 10 seconds or less before paying. Source duration: '+duration.toFixed(1)+' seconds.');
-    // Detect orientation from source metadata if browser was unable to fill it.
-    let width=Number(video.width),height=Number(video.height);
-    if(!width||!height){const m=/(\d{2,5})x(\d{2,5})/.exec(times);if(m){width=+m[1];height=+m[2];}}
-    if(!width||!height){width=16;height=9;}
+    // Video width/height metadata can describe the unrotated sensor pixels.
+    // FFmpeg autorotates display-matrix tags as it extracts frames. Read the
+    // ACTUAL first extracted PNG dimensions, not upload/MP4 metadata, to
+    // preserve portrait phone recordings and their true output orientation.
+    const header=await readFile(path.join(dir,'frames',files[0]));
+    if(header.length<24||!header.subarray(0,8).equals(PNG_MAGIC))throw Error('Extracted first frame was not a valid PNG');
+    const width=header.readUInt32BE(16),height=header.readUInt32BE(20);
+    if(width<16||height<16||width>8192||height>8192)throw Error('Invalid extracted video dimensions');
     job.frames=files.length;job.duration=+duration.toFixed(2);job.size=frameOutputSize(width,height);
-    const scale=Math.min(1,1280/Math.max(width,height));
+    const scale=Math.min(2,1280/Math.max(width,height));
     job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
     job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
     job.minOutputOnly=minimumOutputEstimate(files.length,width,height,opts.quality,opts.model);
