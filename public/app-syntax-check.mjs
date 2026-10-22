@@ -14,7 +14,8 @@ const end=server.indexOf('async function generate(b)',start);
 if(start<0||end<0)throw Error('Task construction function not found');
 const source=server.slice(start,end);
 const sandbox={
- PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'klingo1edit',name:'Kling O1',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'kling3omni',name:'Kling 3.0 Omni',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
+ PRESETS:[{id:'seedance25',name:'Seedance 2.5',model:'seedance',task:'seedance-2.5',support:['image','video','audio']},{id:'seedance2fast',name:'Seedance 2 Fast',model:'seedance',task:'seedance-2-fast',support:['image','video','audio']},{id:'klingmotion',name:'Kling Motion Control',model:'kling',task:'motion_control',support:['image','video']},{id:'klingo1edit',name:'Kling O1',model:'kling',task:'omni_video_generation',support:['image','video']},
+ {id:'nanoframe',name:'Nano Banana Frame',model:'gemini',task:'nano-banana-2.1',support:['image']},{id:'nanoframemask',name:'Nano Banana Mask Frame',model:'gemini',task:'nano-banana-2.1',support:['image']},{id:'kling3omni',name:'Kling 3.0 Omni',model:'kling',task:'omni_video_generation',support:['image','video']},{id:'videoswap',name:'Video FaceSwap',model:'Qubico/video-toolkit',task:'face-swap',support:['image','video']}],
  bad:(message)=>new Error(message)
 };
 const task=vm.runInNewContext(source+'; task',sandbox);
@@ -123,6 +124,32 @@ assert.match(cleanTags.input.prompt,/@image_1\b/);
 assert.doesNotMatch(cleanTags.input.prompt,/@video1|@image1/);
 console.log('Kling 3.0 Omni multimodal video reference payload tests passed');
 
+
+// The model has no native mask parameter. Masked mode uses local compositing.
+const frameRefs=[{type:'image',url:'https://example.com/original-frame.png'},{type:'image',url:'https://example.com/replacement-character.png'}];
+for(const mode of ['nanoframe','nanoframemask']){
+ const req=task({preset:mode,action:'create',prompt:'Replace main actor, retain set',resolution:'1K',ratio:'9:16'},frameRefs);
+ assert.equal(req.model,'gemini');
+ assert.equal(req.task_type,'nano-banana-2.1');
+ assert.equal(req.input.resolution,'1K');
+ assert.equal(req.input.aspect_ratio,'9:16');
+ assert.equal(req.input.output_format,'png');
+ assert.equal(req.input.image_urls[0],'https://example.com/original-frame.png');
+ assert.equal(req.input.image_urls[1],'https://example.com/replacement-character.png');
+ assert.match(req.input.prompt,/IMAGE 1/);
+ assert.match(req.input.prompt,/IMAGE 2/);
+ assert.ok(!('mask' in req.input),'Mask must be applied client-side, not sent as unsupported API parameter');
+ assert.throws(()=>task({preset:mode,action:'edit',prompt:'replace',resolution:'1K'},frameRefs),/image frame|Edit existing video/);
+ assert.throws(()=>task({preset:mode,action:'create',prompt:'replace',resolution:'1K'},frameRefs.slice(0,1)),/exactly two images/);
+ assert.throws(()=>task({preset:mode,action:'create',prompt:'replace',resolution:'1K'},frameRefs.concat([{type:'video',url:'https://example.com/clip.mp4'}])),/source video/);
+ assert.throws(()=>task({preset:mode,action:'create',prompt:'replace',resolution:'1080p'},frameRefs),/resolution/);
+}
+assert.match(server,/proxyGeneratedImage/);
+assert.match(server,/image\.png/);
+assert.match(page,/id="frameMaskCanvas"/);
+assert.match(page,/compositeMaskedFrame/);
+assert.match(page,/uploadFrameMask/);
+console.log('Nano Banana one-frame and local-mask compositing integration tests passed');
 
 const videoCode=server.slice(server.indexOf('async function mp4Duration(file){'),server.indexOf('async function uploadBinary(req){'));
 if(!videoCode.startsWith('async function mp4Duration'))throw Error('Video duration parser missing');
