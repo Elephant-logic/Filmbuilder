@@ -27,6 +27,9 @@ const PRESETS=[
 {id:'nanobanana21',name:'Nano Banana 2.1',type:'image',model:'gemini',task:'nano-banana-2.1',support:['image']},
 {id:'nanoframe',name:'Nano Banana 2.1 · Replace Character (1 Frame)',type:'image',model:'gemini',task:'nano-banana-2.1',support:['image']},
 {id:'nanoframemask',name:'Nano Banana 2.1 · Replace Character (Masked Frame)',type:'image',model:'gemini',task:'nano-banana-2.1',support:['image']},
+{id:'gptframeflare',name:'GPT Image 2.5 Flare · Character Replace (Frame)',type:'image',model:'gpt-image-2.5-flare',task:'gpt-image-edit',support:['image']},
+{id:'gptframesunburst',name:'GPT Image 2.5 Sunburst · Character Replace (Frame)',type:'image',model:'gpt-image-2.5-sunburst',task:'gpt-image-edit',support:['image']},
+{id:'gptframemask',name:'GPT Image 2.5 Sunburst · Character Replace (Native Mask)',type:'image',model:'gpt-image-2.5-sunburst',task:'gpt-image-edit',support:['image']},
 {id:'nanobananapro',name:'Nano Banana Pro',type:'image',model:'gemini',task:'nano-banana-pro',support:['image']},
 {id:'kling3',name:'Kling 3.0',type:'video',model:'kling',task:'video_generation',support:['image']},
 {id:'veo31',name:'Veo 3.1 Fast',type:'video',model:'veo3.1',task:'veo3.1-video-fast',support:['image']},
@@ -242,7 +245,7 @@ async function hostedReference(id){
  return {url:signedMediaUrl(id,meta.name),host:'render',expiresInSeconds:6*3600};
 }
 function outputMedia(data){const out=[],seen=new Set();function walk(v,k=''){if(!v||out.length>20)return;if(typeof v==='string'){if(v.startsWith('https://')&&(/image|video|url|audio|output/i.test(k)||/\.(mp4|webm|png|webp|jpe?g)(\?|$)/i.test(v))&&!seen.has(v)){seen.add(v);out.push({url:v,type:/video|\.mp4|\.webm/i.test(k+' '+v)?'video':/audio|\.mp3|\.wav/i.test(k+' '+v)?'audio':'image'});}}else if(Array.isArray(v))v.forEach(x=>walk(x,k));else if(typeof v==='object')Object.entries(v).forEach(([k2,x])=>walk(x,k2));}walk(data);return out;}
-async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. For an image and video: if the user needs to REPLACE A WHOLE PERSON IN THE SAME ORIGINAL VIDEO while keeping the same background, camera and movements, say NO VERIFIED PiAPI preset in this app reliably does this; do not recommend kling3omni or klingmotion as a character swap. Kling 3.0 Omni generates a NEW video guided by reference style/content and may ignore the original video scene. For this requirement, note dedicated WAN Animate Replace exists outside PiAPI and is not integrated into this app. Choose kling3omni with action create ONLY if they want a NEW reference-inspired video, klingmotion with action create for motion transfer to a NEW scene, videoswap with action create for face-only swapping. Do not recommend klingo1edit because live tests repeatedly returned PiAPI error 10003. Video FaceSwap requires an MP4 under 10 MB, no more than 720p or 600 frames. For a SINGLE IMAGE FRAME character replacement, choose nanoframe (simple) or nanoframemask (masked background-preserving compositing). Both use Nano Banana 2.1, one original image first and one character image second; NEVER imply these presets edit a full video automatically. Nano Banana does not accept a hard pixel mask: masked mode composites pixels outside the painted selection locally AFTER generation. Warn that content policies still apply and do not promise acceptance. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), action (one of create/edit/extend), shots (array of {title,description,seconds}), ratio, duration, resolution. If the user specifically requests Seedance video edits to lighting or appearance, choose preset seedance25, action edit, resolution 720p and ratio adaptive. For video extension choose seedance25 and action extend. For Kling 3.0 Omni or O1 video references, describe the original video as @video and the replacement character reference image as @image_1; for Seedance use @video1 and @image1. Respect the requested creative change. Never assert the uploaded video content has been inspected. For image tasks pick an image preset and action create. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
+async function chat(b){if(!OPENAI){if(DEMO)return {reply:'Demo mode: add OPENAI_API_KEY for real GPT creative planning.',prompt:String(b.text||''),preset:'seedance25',shots:[]};throw bad('OpenAI API key missing');}const history=(Array.isArray(b.history)?b.history:[]).slice(-12).filter(x=>['assistant','user'].includes(x.role)&&typeof x.content==='string').map(x=>({role:x.role,content:x.content.slice(0,5000)}));const parts=[{type:'text',text:String(b.text||'').slice(0,7000)}];for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,4)){const a=await asset(id,false);if(a.mime.startsWith('image/')&&a.size<6*1024*1024){const bytes=await readFile(path.join(STORAGE,a.id+'.bin'));parts.push({type:'image_url',image_url:{url:'data:'+a.mime+';base64,'+bytes.toString('base64'),detail:'low'}});}else parts[0].text+='\nReference uploaded: '+a.name+' ('+a.mime+'). Video/audio content was not visually reviewed.';}const system='You are a creative director helping plan images, commercials, shorts and cinematic videos. Choose one preset ID from: '+PRESETS.map(p=>p.id+':'+p.type).join(', ')+'. Consider reference material, consistency, visual quality, realism, constraints. Never claim you generated media. Video/audio uploads are metadata only and must not be described as fully reviewed. For an image and video: if the user needs to REPLACE A WHOLE PERSON IN THE SAME ORIGINAL VIDEO while keeping the same background, camera and movements, say NO VERIFIED PiAPI preset in this app reliably does this; do not recommend kling3omni or klingmotion as a character swap. Kling 3.0 Omni generates a NEW video guided by reference style/content and may ignore the original video scene. For this requirement, note dedicated WAN Animate Replace exists outside PiAPI and is not integrated into this app. Choose kling3omni with action create ONLY if they want a NEW reference-inspired video, klingmotion with action create for motion transfer to a NEW scene, videoswap with action create for face-only swapping. Do not recommend klingo1edit because live tests repeatedly returned PiAPI error 10003. Video FaceSwap requires an MP4 under 10 MB, no more than 720p or 600 frames. For a SINGLE IMAGE FRAME character replacement, choose nanoframe (simple) or nanoframemask (masked background-preserving compositing). Both use Nano Banana 2.1, one original image first and one character image second; NEVER imply these presets edit a full video automatically. Nano Banana does not accept a hard pixel mask: masked mode composites pixels outside the painted selection locally AFTER generation. For GPT Image 2.5, use gptframeflare or gptframesunburst for single-frame edits and gptframemask for a native PNG transparency mask plus original-background compositing. GPT frame edits do not process whole videos. Warn that content policies still apply and do not promise acceptance. Reply ONLY with JSON containing keys reply (conversational answer), prompt (refined production prompt), preset (recommended preset ID), action (one of create/edit/extend), shots (array of {title,description,seconds}), ratio, duration, resolution. If the user specifically requests Seedance video edits to lighting or appearance, choose preset seedance25, action edit, resolution 720p and ratio adaptive. For video extension choose seedance25 and action extend. For Kling 3.0 Omni or O1 video references, describe the original video as @video and the replacement character reference image as @image_1; for Seedance use @video1 and @image1. Respect the requested creative change. Never assert the uploaded video content has been inspected. For image tasks pick an image preset and action create. Use the user language.';const r=await provider('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+OPENAI,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:system},...history,{role:'user',content:parts}],response_format:{type:'json_object'},temperature:0.7})});const s=r?.choices?.[0]?.message?.content;if(!s)throw bad('Empty OpenAI response',502);try{return JSON.parse(s)}catch{throw bad('Could not parse GPT response',502)}}
 function task(b,refs){
  const p=PRESETS.find(x=>x.id===b.preset);
  if(!p)throw bad('Choose a valid PiAPI model from the dropdown. Your previous model selection may be outdated.');
@@ -364,10 +367,93 @@ function task(b,refs){
  }
  return {model:p.model,task_type:p.task,input};
 }
+const GPT_FRAME_PRESETS=new Set(['gptframeflare','gptframesunburst','gptframemask']);
+const GPT_RESULT_LIMIT=24*1024*1024;
+function gptOutputPath(id){if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw bad('Invalid GPT image task ID');return path.join(STORAGE,'gpt-image-'+id+'.png');}
+function gptSizeForRatio(ratio){
+ const sizes={'1:1':'1024x1024','16:9':'1536x1024','4:3':'1536x1024','9:16':'1024x1536','3:4':'1024x1536'};
+ if(!Object.hasOwn(sizes,ratio))throw bad('Choose 1:1, landscape or portrait aspect ratio for GPT Image.');
+ return sizes[ratio];
+}
+function gptFrameOptions(b,images){
+ if(!GPT_FRAME_PRESETS.has(b.preset))throw bad('Unknown GPT Image editing preset');
+ if(String(b.action||'create')!=='create')throw bad('GPT Image frame editing uses Create, not Edit video');
+ if(!Array.isArray(images)||images.length!==2)throw bad('Upload exactly two local images: original frame first, replacement character second');
+ const quality=String(b.gptQuality||'low');
+ if(!['low','medium','high'].includes(quality))throw bad('GPT Image quality must be low, medium or high');
+ const prompt=String(b.prompt||'').trim();
+ if(!prompt)throw bad('Enter a character replacement instruction');
+ return {
+  model:b.preset==='gptframeflare'?'gpt-image-2.5-flare':'gpt-image-2.5-sunburst',
+  prompt:'Edit the FIRST image as the original scene frame. Use the SECOND image ONLY as the replacement character appearance reference. Replace the full main person including face, hair, body and clothes. Preserve original pose, movement moment, background, composition, lighting, camera and other objects. Do not create a new scene. '+prompt,
+  quality,size:gptSizeForRatio(String(b.ratio||'1:1')),
+  n:1,output_format:'png'
+ };
+}
+async function submitGPTFrame(b){
+ const ids=Array.isArray(b.attachments)?b.attachments:[];
+ if(ids.length!==2||(Array.isArray(b.urls)&&b.urls.length))throw bad('GPT frame editing requires exactly two uploaded images and no hosted links. Order: original frame, then replacement character.',422);
+ const images=[];
+ for(const id of ids){
+  const a=await asset(id);
+  if(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>25*1024*1024)throw bad('GPT Image accepts PNG, JPG and WEBP images up to 25MB each',422);
+  images.push(a);
+ }
+ const opts=gptFrameOptions(b,images);
+ const form=new FormData();
+ for(const [k,v] of Object.entries(opts))form.append(k,String(v));
+ for(const a of images)form.append('image[]',new Blob([a.bytes],{type:a.mime}),a.name);
+ if(b.preset==='gptframemask'){
+  if(typeof b.nativeMaskId!=='string')throw bad('Paint the subject first to create the native GPT mask',422);
+  const m=await asset(b.nativeMaskId);
+  if(m.mime!=='image/png'||m.size>25*1024*1024||!m.bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw bad('GPT Image mask must be a valid PNG under 25 MB',422);
+  form.append('mask',new Blob([m.bytes],{type:'image/png'}),'transparent-edit-mask.png');
+ }
+ const reply=await provider('https://api.piapi.ai/api/v1/images/edits/async',{method:'POST',headers:{'X-API-Key':PIAPI},body:form},45000);
+ const data=reply.data?.task_id?reply.data:reply;
+ const id=data.task_id||data.id;
+ if(typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw bad('GPT Image edit response had no valid task ID; check PiAPI history before resubmitting to avoid a double charge',502);
+ return {id,status:data.status||'pending',model:opts.model+' · frame edit',gptImage:true,media:[]};
+}
+async function gptFrameStatus(id){
+ const cache=gptOutputPath(id);
+ let cached=false;try{cached=(await stat(cache)).size>0;}catch{}
+ if(cached)return {id,status:'completed',media:[{type:'image',url:'/api/gpt-image/'+encodeURIComponent(id)}],gptImage:true};
+ const reply=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(id),{headers:{'X-API-Key':PIAPI}});
+ const data=reply.data?.task_id?reply.data:reply;
+ const status=String(data.status||'pending').toLowerCase();
+ if(status==='completed'){
+  const output=data.output||{};
+  const image=output.data?.[0];
+  const encoded=image?.b64_json;
+  if(typeof encoded==='string'){
+   if(encoded.length>GPT_RESULT_LIMIT*1.4||!/^[A-Za-z0-9+/=]+$/.test(encoded))throw bad('GPT result image exceeded safe image size or was invalid',502);
+   const bytes=Buffer.from(encoded,'base64');
+   if(bytes.length>GPT_RESULT_LIMIT||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw bad('GPT result was not a valid PNG',502);
+   await writeFile(cache,bytes,{mode:0o600});
+   return {id,status:'completed',gptImage:true,media:[{type:'image',url:'/api/gpt-image/'+encodeURIComponent(id)}]};
+  }
+  if(typeof image?.url==='string'&&image.url.startsWith('https://'))return {id,status:'completed',gptImage:true,media:[{type:'image',url:image.url}]};
+  throw bad('GPT image task completed but no image was found. Check the task in PiAPI before resubmitting.',502);
+ }
+ const msg=data.output?.error_body?.error?.message||data.error?.message||data.output?.error_body?.message||'';
+ return {id,status,gptImage:true,media:[],...(status==='failed'?{error:String(msg||'GPT image edit failed').slice(0,400)}:{})};
+}
+async function streamGPTImage(res,id){
+ const file=gptOutputPath(id);
+ try{await stat(file);}catch{
+  const r=await gptFrameStatus(id);
+  if(r.status!=='completed')throw bad('GPT edited image not ready yet',409);
+ }
+ const bytes=await readFile(file);
+ res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length,'Cache-Control':'private,no-store'});
+ return res.end(bytes);
+}
 async function generate(b){
  if(!PIAPI)throw bad('PiAPI key missing');
  const p=PRESETS.find(x=>x.id===b.preset);
  if(!p)throw bad('Invalid model selection. Reopen the production board and select Seedance 2.5.');
+ if(GPT_FRAME_PRESETS.has(p.id))return await submitGPTFrame(b);
  const refs=[];
  if(p.id!=='custom'){
   for(const id of (Array.isArray(b.attachments)?b.attachments:[]).slice(0,8)){
@@ -502,6 +588,8 @@ if(req.method==='GET'&&route==='/api/assets/status'){
 }
 if(req.method==='GET'&&route.startsWith('/api/reference/')){const id=route.split('/').pop(),a=await asset(id,false);return send(res,200,{url:signedMediaUrl(id,a.name),expiresInSeconds:21600});}
 if(req.method==='GET'&&route.startsWith('/api/task/'))return send(res,200,await status(route.split('/').pop()));
+if(req.method==='GET'&&route.startsWith('/api/gpt-task/'))return send(res,200,await gptFrameStatus(route.split('/').pop()));
+if(req.method==='GET'&&route.startsWith('/api/gpt-image/'))return await streamGPTImage(res,route.split('/').pop());
 if(req.method==='GET'&&route.startsWith('/api/job-image/'))return await proxyGeneratedImage(res,route.split('/').pop());
 if(req.method!=='POST'||!sameOrigin(req))throw bad('Unsupported or cross-origin request',403);
 if(route==='/api/upload')return send(res,200,await upload(await json(req)));
