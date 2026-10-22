@@ -107,3 +107,15 @@ Quality is **low, medium, high** (defaults to **low**). Flare and Sunburst have 
 
 Official docs: https://piapi.ai/docs/gpt-image/gpt-image-api
 PiAPI walkthrough: https://piapi.ai/blogs/gpt-image-2-5-api-first-call-editing
+
+
+### GPT Image 1.5 character replacement — simple and native mask
+
+Filmbuilder offers two additional **single-frame** presets using the same PiAPI key and the same documented async edit endpoint as GPT Image 2.5:
+
+- **GPT Image 1.5 · Character Replace (Frame)**: two uploaded pictures in order — **original video frame first, replacement character second**. Sends `model=gpt-image-1.5` and the two images as `image[]` fields, no mask. The app defaults to low quality.
+- **GPT Image 1.5 · Character Replace (Native Mask)**: the same two images, plus a painted subject selection. The editor makes a PNG alpha mask for the source frame, uploads it with the PiAPI `mask` field, and offers the original-background composite download after generation. Native masks guide edits; they do not guarantee exact boundaries or identical pose.
+
+**PiAPI advertises GPT Image 1.5 “from $0.009/image.”** That is an *estimated low-quality, square 1024×1024 output cost*, not an all-inclusive edit charge. PiAPI's estimated output-only prices are $0.009 (square low), $0.013 (portrait/landscape low), $0.034 (square medium), $0.051 (portrait/landscape medium), $0.133 (square high), and $0.200 (portrait/landscape high). Editing also incurs billed image-input tokens (both source and character reference). All charges vary with actual tokens. PiAPI's pricing table quotes GPT Image 1.5 at $8 per million input-image tokens, $32 per million output-image tokens and $5 per million text-input tokens. See [PiAPI GPT image API docs](https://piapi.ai/docs/gpt-image/gpt-image-api) for current figures.
+
+**No automatic full-video processing**: These edit one still image/frame at a time, not an MP4, and do not ensure consistency between frames. No paid calls are made by automated tests or deployment. User confirmation is required before submitting a billable edit.
