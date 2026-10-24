@@ -344,7 +344,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   await save(job);return receipt(job);
  }
  async function status(id){return receipt(await safeJob(id));}
- async function stream(id,kind,res){
+ async function stream(id,kind,res,req){
   const job=await safeJob(id);
   if(kind==='preview'&&job.completedFrames<1)throw Error('Preview image is not ready');
   if(['source-first','source-middle','source-last'].includes(kind)){
@@ -359,8 +359,25 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   if(kind==='download'&&job.status!=='completed')throw Error('Final MP4 not ready');
   const file=kind==='preview'?path.join(folder(id),'edited','000001.png'):path.join(folder(id),kind==='progress'?'progress.mp4':'result.mp4');
   const info=await stat(file);
-  res.writeHead(200,{'Content-Type':kind==='preview'?'image/png':'video/mp4','Content-Length':info.size,
-   'Content-Disposition':kind==='download'?'attachment; filename="filmbuilder-character-swap.mp4"':'inline','Cache-Control':'private,no-store','Accept-Ranges':'none'});
+  const contentType=kind==='preview'?'image/png':'video/mp4';
+  // HTML5 video elements may require HTTP byte ranges for seeking/playback,
+  // even when this is a small, rapidly refreshed MP4 snapshot.
+  const range=kind==='progress'?String(req?.headers?.range||''):'';
+  if(range){
+   const m=/^bytes=(\\d*)-(\\d*)$/.exec(range);
+   if(!m){res.writeHead(416,{'Content-Range':'bytes */'+info.size});return res.end();}
+   const start=m[1]?Number(m[1]):Math.max(0,info.size-Number(m[2]||0));
+   const end=m[2]&&m[1]?Math.min(info.size-1,Number(m[2])):info.size-1;
+   if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||start>=info.size){
+    res.writeHead(416,{'Content-Range':'bytes */'+info.size});return res.end();
+   }
+   res.writeHead(206,{'Content-Type':contentType,'Content-Length':end-start+1,
+    'Content-Range':'bytes '+start+'-'+end+'/'+info.size,'Accept-Ranges':'bytes','Cache-Control':'private,no-store'});
+   return createReadStream(file,{start,end}).pipe(res);
+  }
+  res.writeHead(200,{'Content-Type':contentType,'Content-Length':info.size,
+   'Content-Disposition':kind==='download'?'attachment; filename="filmbuilder-character-swap.mp4"':'inline',
+   'Cache-Control':'private,no-store','Accept-Ranges':kind==='progress'?'bytes':'none'});
   createReadStream(file).pipe(res);
  }
  return {prepare,preview,continueJob,cancel,status,stream,setEraseRegion};
