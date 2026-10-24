@@ -28,9 +28,11 @@
  <p class="fine" id="frameMaskStatus" aria-live="polite">Upload the original frame first.</p>
 </div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> <span id="audioLabel">Request generated audio (supported models)</span></label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
 <div class="group" id="videoSwapBox"><h3>Video Character Swap · Frame-by-frame (Experimental)</h3>
- <p class="fine">Upload your original MP4/MOV and replacement character with the upload box above. This uses GPT Image to edit each sampled video frame, uses the previous edited frame as a guide, rebuilds an MP4 and keeps the original sound. The FIRST FRAME preview costs a single PiAPI image edit; remaining frames require separate approval. No automatic mask tracking or scene-cut detection yet.</p>
+ <p class="fine">Upload your original MP4/MOV and replacement character with the upload box above. This uses GPT Image to edit each sampled video frame, uses the previous edited frame as a guide, rebuilds an MP4 and keeps the original sound. The FIRST FRAME preview costs a single paid image edit from your selected API account; remaining frames require separate approval. No automatic mask tracking or scene-cut detection yet.</p>
  <div class="field"><label>Original source video</label><select id="vsVideo"></select></div>
  <div class="field"><label>Replacement character image</label><select id="vsCharacter"></select></div>
+ <div class="field"><label>Which API pays for the video edits?</label><select id="vsProvider"><option value="openai" selected>OpenAI Direct · uses OpenAI API billing</option><option value="piapi">PiAPI · uses PiAPI credits</option></select>
+ <p class="fine" id="vsProviderHint">OpenAI Direct uses the OPENAI_API_KEY already configured on your Render server. ChatGPT subscription credits are separate from API billing.</p></div>
  <div class="duo">
   <div class="field"><label>Image model</label><select id="vsModel"><option value="gpt-image-1.5">GPT Image 1.5</option><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select></div>
   <div class="field"><label>Image quality</label><select id="vsQuality"><option value="low">Low · cheapest</option><option value="medium">Medium · more expensive</option><option value="high">High · significantly more expensive</option></select></div>
@@ -41,8 +43,8 @@
  </div>
  <label style="display:block;margin:7px 0"><input id="vsSound" type="checkbox" checked> Keep sound from original video</label>
  <p class="fine" style="margin:8px 0"><strong>Locked first-frame anchor — always ON.</strong> After you approve the first replacement frame, Filmbuilder saves it as the fixed reference for the character's face, hair and clothing in every later edit. Each new original video frame controls the pose and movement.</p>
- <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox" checked> Also use previous edited frame as a secondary continuity guide (4 images per edit from frame 3)</label>
- <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and therefore can raise PiAPI input-token charges. PiAPI charges PER IMAGE EDIT, not per video. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
+ <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox"> Also use previous edited frame as a secondary continuity guide (4 images per edit from frame 3)</label>
+ <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and can increase input-token charges on either API. Both APIs bill each image edit individually; Direct uses OpenAI billing rather than PiAPI credits. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
  <div id="vsJob" class="field" style="margin-top:12px" role="status" aria-live="polite">Upload a video and character image to start.</div>
  <button id="vsPreview" type="button" class="primary hide" style="width:100%">2. Pay for ONE preview frame</button>
@@ -543,11 +545,11 @@ const vsTerminal=new Set(['completed','failed','cancelled','interrupted']);
 function renderVideoSwapJob(j){
  videoSwapCurrent=j;
  const progress=Number(j.completedFrames||0);
- let status='Status: '+j.status+' · '+(j.stage||'')+'\nFrames: '+(j.frames||'?')+' at '+j.fps+' fps · edited: '+progress+'/'+(j.frames||'?')+' · submitted paid edits: '+(j.paidSubmissions||0)+'.';
+ let status='Provider: '+((j.imageProvider||'piapi')==='openai'?'OpenAI Direct (OpenAI API billing)':'PiAPI (PiAPI credits)')+'\nStatus: '+j.status+' · '+(j.stage||'')+'\nFrames: '+(j.frames||'?')+' at '+j.fps+' fps · edited: '+progress+'/'+(j.frames||'?')+' · submitted paid edits: '+(j.paidSubmissions||0)+'.';
  status+='\nFirst-frame character anchor: '+(j.anchorLocked?'LOCKED from approved frame 1 (kept for all future frames)':'Waiting for successful first-frame preview')+'.';
  status+='\nLater frames use original frame + character reference + locked first frame'+(j.continuity===false?' (previous-frame guide disabled).':'+ previous edited frame when distinct.');
  if(j.minOutputOnly!=null)status+='\nOutput-image price illustration (LOW GPT 1.5 only): about $'+j.minOutputOnly.toFixed(3)+' across '+j.frames+' frames PLUS all input-image token charges. ACTUAL total is not capped by this figure.';
- else status+='\nPricing is variable per image edit, including input-image charges. No accurate total or upper bound is available from PiAPI before billing.';
+ else status+='\nPricing is variable per image edit, including input-image charges. No reliable total or upper bound is available before billing.';
  if(j.error)status+='\nERROR: '+j.error;
  $('vsJob').textContent=status;
  $('vsPreview').classList.toggle('hide',j.status!=='ready');
@@ -570,11 +572,11 @@ async function videoSwapPrepare(){
  if(videoSwapBusy)return;
  const videoId=$('vsVideo').value,characterId=$('vsCharacter').value;
  if(!videoId||!characterId){alert('First upload your original MP4/MOV and the replacement character image.');return;}
- if(!confirm('Prepare frames with FFmpeg? This step is FREE: it does not generate images or use PiAPI credits. Video duration must be at most 10 seconds.'))return;
+ if(!confirm('Prepare frames with FFmpeg? This step is FREE: neither OpenAI nor PiAPI will be charged. Video duration must be at most 10 seconds.'))return;
  videoSwapBusy=true;$('vsPrepare').disabled=true;
  try{
   const r=await api('/api/video-swap/prepare',{
-   videoId,characterId,model:$('vsModel').value,quality:$('vsQuality').value,
+   videoId,characterId,imageProvider:$('vsProvider').value,model:$('vsModel').value,quality:$('vsQuality').value,
    fps:Number($('vsFps').value),prompt:$('vsPrompt').value,
    preserveAudio:$('vsSound').checked,continuity:$('vsGuide').checked
   });
@@ -585,7 +587,7 @@ async function videoSwapPrepare(){
 async function videoSwapPreview(){
  if(videoSwapBusy||!videoSwapCurrent||videoSwapCurrent.status!=='ready')return;
  const j=videoSwapCurrent;
- if(!confirm('Submit exactly ONE GPT Image edit using your PiAPI credits? The first successful frame will be LOCKED as the permanent replacement-character reference for the video. Check it carefully before approving the paid remainder. Input and output tokens cost money.'))return;
+ if(!confirm('Submit exactly ONE paid GPT Image edit using '+((j.imageProvider||'piapi')==='openai'?'your OpenAI API billing account':'PiAPI credits')+'? The resulting first frame will become the permanent locked character guide. Check it carefully before approving the remaining edits. Image and text tokens cost money.'))return;
  videoSwapBusy=true;
  try{renderVideoSwapJob(await api('/api/video-swap/preview',{id:j.id}));}
  catch(e){alert('First-frame preview failed: '+e.message);}
@@ -596,13 +598,18 @@ async function videoSwapContinue(){
  const j=videoSwapCurrent,remaining=j.frames-j.completedFrames;
  if(remaining<=0)return;
  const expected='RUN '+remaining;
- const confirmed=prompt('Before spending money: does the locked first replacement frame look RIGHT? This will send '+remaining+' SEPARATE PAID PiAPI IMAGE EDITS. Each uses the original frame, character reference and locked first edited frame, plus the previous frame when enabled. The additional reference images increase input token charges. Final cost is VARIABLE and NOT capped by the displayed output-only estimate. Type '+expected+' to approve, or Cancel:', '');
+ const confirmed=prompt('Before spending money: does the locked first replacement frame look RIGHT? This will send '+remaining+' SEPARATE PAID GPT IMAGE EDITS using '+((j.imageProvider||'piapi')==='openai'?'OpenAI Direct billing':'PiAPI credits')+'. Each uses the original frame, character reference and locked first edited frame, plus the previous frame when enabled. The additional reference images increase input token charges. Final cost is VARIABLE and NOT capped by the displayed output-only estimate. Type '+expected+' to approve, or Cancel:', '');
  if(confirmed!==expected)return;
  videoSwapBusy=true;
  try{renderVideoSwapJob(await api('/api/video-swap/continue',{id:j.id}));}
  catch(e){alert('Video processing could not start: '+e.message);}
  finally{videoSwapBusy=false;}
 }
+$('vsProvider').onchange=()=>{
+ $('vsProviderHint').textContent=$('vsProvider').value==='openai'
+  ?'OpenAI Direct: image edits bill your OpenAI API account (uses OPENAI_API_KEY on Render), not PiAPI credits. ChatGPT Plus does not include API credits.'
+  :'PiAPI: image edits bill your existing PiAPI credits, not your OpenAI account.';
+};
 $('vsPrepare').onclick=videoSwapPrepare;
 $('vsPreview').onclick=videoSwapPreview;
 $('vsContinue').onclick=videoSwapContinue;
