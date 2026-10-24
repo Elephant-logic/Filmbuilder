@@ -261,7 +261,7 @@ try{
  const region={x:0.2,y:0.1,w:0.6,h:0.8};
  const regionSaved=await maskedController.setEraseRegion(maskStarted.id,region);
  assert.deepEqual(regionSaved.eraseRegion,region);
- assert.equal(regionSaved.paidSubmissions,0,'Saving the person's mask is free');
+ assert.equal(regionSaved.paidSubmissions,0,'Saving the person removal mask is free');
  const sample=await readFile(path.join(root,'video-swap-'+maskStarted.id,'frames','000001.png'));
  const maskFromHelper=PNG.sync.read(nativePersonMask(sample,region));
  assert.equal(maskFromHelper.data[(1*maskFromHelper.width+1)*4+3],255);
