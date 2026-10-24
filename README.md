@@ -144,3 +144,11 @@ Select **Video Character Swap** in the sidebar. Upload a 10-second-or-shorter so
 **Server build:** `npm test` installs `@ffmpeg-installer/ffmpeg` and runs the actual FFmpeg integration test. No real PiAPI provider calls occur during the test suite; all submitted-image tests use a mock provider.
 
 **Phone rotation / portrait fix (October 2026):** Input MP4s can contain portrait display rotation metadata despite landscape encoded pixel dimensions. Video Swap now uses the orientation of the actual FFmpeg-extracted PNG (after autorotation) for PiAPI portrait/landscape size selection and final MP4 frame dimensions. A rotated-MP4 integration test verifies extraction at 30 FPS and portrait output.
+
+### OpenAI Direct for Video Character Swap (October 2026)
+
+The video character swap panel offers **OpenAI Direct** (default, billed to your OpenAI API account) or **PiAPI** (billed to PiAPI credits). Server-only OPENAI_API_KEY and PIAPI_API_KEY variables are used; no API keys are sent to the browser. The selected provider is saved with the job at free preparation time and cannot silently change mid-job.
+
+OpenAI Direct calls POST https://api.openai.com/v1/images/edits with bearer authorization and multipart image[] files, using GPT Image 1.5, 2.5 Flare or 2.5 Sunburst. The first generated image is saved as an immutable anchor. Further edits use the current original video frame for pose and motion, the reference photo for identity, the locked first edited frame as the primary appearance reference, and optionally the previous edited frame as a fourth reference. Previous-frame continuity is unchecked by default to save input tokens.
+
+**Paying:** Free frame preparation does not call either provider. The first-frame preview requires separate confirmation and the remaining frame sequence requires typed approval. Image edits are separately billed by the chosen API provider, including input and output tokens; ChatGPT subscriptions do not include OpenAI API credits. No accurate upper spend cap is guaranteed. A timed-out request can still be charged, so no automatic paid retries occur. PiAPI-specific output-only estimates are not displayed for OpenAI Direct. Automated tests mock both services and make no paid requests.
