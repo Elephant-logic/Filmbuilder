@@ -10,7 +10,32 @@
 .asset .asset-link button{align-self:flex-start;color:#ecf6ff;border:1px solid #6c87ac;background:#304765;border-radius:7px;padding:6px 10px}
 .asset .asset-link small{color:#aabbd4}.asset video{width:110px;max-height:80px;border-radius:7px}.upload-status{min-height:18px;color:#9fd6d3;font-size:12px;margin:8px 0 0}.asset .asset-details{display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}.shot{padding:9px 0;border-bottom:1px solid #35405a;font-size:13px;color:#c1cde5}.shot strong{color:#fff}.job{padding:12px 0;border-top:1px solid #35405a;overflow-wrap:anywhere}.job .tag{font-size:11px;color:#abc1e8}.job a{font-size:12px}.job img,.job video{width:100%;max-height:300px;object-fit:contain;border-radius:9px;margin-top:9px;background:#0a101e}.warning{color:#ffd69e;font-size:12px}.badge{background:#243251;padding:6px 10px;border-radius:99px;font-size:12px;color:#b6ccff}.row{display:flex;align-items:center;justify-content:space-between;gap:10px}.muted{color:var(--muted)}.hide{display:none!important}
 @media(max-width:1080px){.shell{grid-template-columns:80px minmax(310px,1fr) minmax(300px,380px)}.sidebar .label,.sidebar .sub,.sidebar .foot{display:none}.sidebar{align-items:center}.sidebar button{width:45px;overflow:hidden;font-size:0;text-align:center}.sidebar button:before{content:'◆';font-size:16px}.logo{font-size:14px;padding:4px}.logo span{display:none}}
-@media(max-width:760px){.shell{display:flex;flex-direction:column;height:100dvh}.sidebar{display:none}.chat{flex:1;min-height:370px}.messages{padding:18px}.workspace{height:45dvh;min-height:250px;border-left:0;border-top:1px solid #34425a;padding:12px}.workspace.collapsed{height:52px;min-height:52px;overflow:hidden}.workspace>div:first-child{cursor:pointer}.chathead{padding:10px 16px}.chathead h1{font-size:15px}.workspace .group{padding:13px}}
+@media(max-width:760px){
+ /* One document scroll: the old 45dvh nested studio scroller made the
+    person-removal canvas unreachable or invisible behind the chat pane. */
+ .shell{display:block;height:auto;min-height:100dvh}
+ .sidebar{display:none}
+ .chat{display:flex;min-height:0;height:auto}
+ .messages{padding:14px 16px;min-height:100px;max-height:22dvh;flex:none;overflow:auto}
+ .empty{margin:0 auto}.empty h2{font-size:19px}
+ .composer{padding:9px 12px}
+ .composer textarea{min-height:44px}
+ .workspace{height:auto;min-height:0;max-height:none;overflow:visible;border-left:0;border-top:1px solid #34425a;padding:12px}
+ .workspace.collapsed{height:auto;min-height:0;overflow:visible}
+ .workspace>div:first-child{cursor:pointer}
+ .chathead{padding:10px 16px}.chathead h1{font-size:15px}
+ .workspace .group{padding:13px}
+ .duo{grid-template-columns:minmax(0,1fr)}
+ #vsMaskPanel{scroll-margin-top:12px}
+ #vsSourceStage{max-width:100%}
+ #vsSourceImage{max-width:100%}
+}
+#vsJob{white-space:pre-line;overflow-wrap:anywhere;font-size:12px;line-height:1.55}
+#vsJobDetails{margin-top:10px;border:1px solid #303b55;border-radius:9px;padding:8px 12px}
+#vsJobDetails summary{cursor:pointer;color:#b8caf8;font-size:13px}
+#vsNextHelp{padding:12px;margin-top:10px;border:1px solid #5375b1;background:#192845;border-radius:10px}
+#vsJumpMask{min-height:52px;margin-top:10px}
+
 </style></head>
 <body><div class="shell">
 <aside class="sidebar"><div class="logo">◈ <span>FRAME<b>CRAFT</b></span></div><div class="sub">Creative studio</div><button class="active" id="newChat">✦ <span class="label">New project</span></button><button id="jumpBoard">▣ <span class="label">Production board</span></button><button id="jumpJobs">◷ <span class="label">Generations</span></button><button id="jumpVideoSwap">▣ <span class="label">Video Character Swap</span></button><div class="foot">GPT plans. PiAPI creates.<p>Generation uses paid credits and only starts when you approve.</p></div></aside>
@@ -47,10 +72,14 @@
  <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox"> Also use previous edited frame as a secondary continuity guide (4 images per edit from frame 3)</label>
  <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and can increase input-token charges on either API. Both APIs bill each image edit individually; Direct uses OpenAI billing rather than PiAPI credits. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
- <div id="vsJob" class="field" style="margin-top:12px" role="status" aria-live="polite">Upload a video and character image to start.</div>
+ <div id="vsNextHelp" role="status" aria-live="polite">Upload your source video and character picture, then prepare frames for free.</div>
+ <button type="button" id="vsJumpMask" class="primary hide" style="width:100%">2. Mark original person for removal (FREE) ↓</button>
+ <details id="vsJobDetails"><summary>Detailed job information (tap to expand)</summary>
+  <div id="vsJob" class="field" style="margin-top:10px">Upload a video and character image to start.</div>
+ </details>
  <div id="vsMaskPanel" class="hide" style="padding:12px;border:1px solid #586b89;border-radius:10px;margin-top:10px">
   <strong>FREE: mark the whole old person to REMOVE</strong>
-  <p class="fine">Draw a rectangle covering the original actor's face, hair, jacket, hands and body — with room for movement. Check the FIRST, MIDDLE and LAST frames. One fixed region is used for the entire clip; this is NOT automatic tracking. If the actor moves outside the rectangle, they may remain. The mask guides AI and cannot guarantee flawless replacement.</p>
+  <p class="fine">Drag your finger diagonally across the ORIGINAL person on the picture below, making a large red box that includes the face, hair, jacket, arms and body. Check FIRST, MIDDLE and LAST frames, then tap Save (FREE). No AI credits are spent until you separately confirm the paid first-frame preview. This static box does not track movement automatically, and masks do not guarantee complete removal.</p>
   <label>Inspect original video frame
    <select id="vsMaskFrame"><option value="source-first">First frame</option><option value="source-middle">Middle frame</option><option value="source-last">Last frame</option></select>
   </label>
@@ -571,6 +600,23 @@ function renderVideoSwapJob(j){
  if(j.previewFrames>=2)status+='\nSilent playable MP4 currently contains '+j.previewFrames+' video frames. Original audio is added to the final video.';
  if(j.error)status+='\nERROR: '+j.error;
  $('vsJob').textContent=status;
+ const waitingForMask=!!j.maskedReplace&&j.status==='ready'&&!j.eraseRegion;
+ const readyMasked=!!j.maskedReplace&&j.status==='ready'&&!!j.eraseRegion;
+ const nextStep= j.status==='ready'
+  ? waitingForMask?'✅ '+j.frames+' video frames ready. 0 extra paid edits for preparation. NEXT: tap the blue button below, draw a box around the OLD person, then SAVE it for FREE.'
+   : readyMasked?'✅ Person-removal area saved. NEXT: pay for ONE replacement preview frame. Check the face and clothing before approving more.'
+   :'✅ '+j.frames+' video frames prepared. NEXT: pay for ONE preview frame only.'
+  : j.status==='preparing'?'Preparing video frames for free. No OpenAI or PiAPI credits are being spent.'
+  : j.status==='preview_ready'?'First replacement picture is ready. Check it carefully; only then approve the three-frame motion test.'
+  : j.status==='sample_ready'?'Four-frame VIDEO sample is ready. Play it and check for character mixing BEFORE paying for the remaining frames.'
+  : j.status==='running'?'Creating a short silent video as frames finish. Press Stop after current task if character mixing appears.'
+  : j.status==='completed'?'Final video is ready, including the original soundtrack. Download it below.'
+  : j.status==='failed'||j.status==='interrupted'?'Video swap stopped: '+(j.error||j.stage||'Open detailed job information below.') 
+  : j.stage||j.status;
+ $('vsNextHelp').textContent=nextStep;
+ $('vsJumpMask').classList.toggle('hide',!waitingForMask&&!readyMasked);
+ $('vsJumpMask').textContent=waitingForMask?'2. Mark original person for removal (FREE) ↓':'Edit the saved removal area (FREE) ↓';
+ if(j.status==='failed'||j.status==='interrupted')$('vsJobDetails').open=true;
  const showRegion=!!j.maskedReplace&&j.status==='ready';
  $('vsMaskPanel').classList.toggle('hide',!showRegion);
  if(showRegion&&vsMaskJobId!==j.id){
@@ -717,6 +763,9 @@ $('vsSaveRegion').onclick=async()=>{
   renderVideoSwapJob(updated);
   alert('Person-removal area saved for the entire video. Inspect the first, middle and last original frames to ensure the rectangle covers all movements BEFORE buying a preview.');
  }catch(e){alert('Could not save person-removal area: '+e.message);}
+};
+$('vsJumpMask').onclick=()=>{
+ $('vsMaskPanel').scrollIntoView({behavior:'smooth',block:'start'});
 };
 $('vsProvider').onchange=()=>{
  $('vsProviderHint').textContent=$('vsProvider').value==='openai'
