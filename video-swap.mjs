@@ -9,12 +9,34 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 
 const require=createRequire(import.meta.url);
+const {PNG}=require('pngjs');
 export const MAX_VIDEO_FRAMES=300;
 export const MAX_VIDEO_SECONDS=10;
 export const ALLOWED_FPS=[8,12,24,30];
 export const VIDEO_MODELS=['gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'];
 export const VIDEO_QUALITIES=['low','medium','high'];
 export const IMAGE_PROVIDERS=['piapi','openai'];
+export function validEraseRegion(region){
+ if(!region||typeof region!=='object')throw Error('Draw an area that covers the entire original person throughout the clip');
+ const {x,y,w,h}=region;
+ if(![x,y,w,h].every(v=>typeof v==='number'&&Number.isFinite(v)))throw Error('Invalid person-removal coordinates');
+ if(x<0||y<0||w<=0||h<=0||x+w>1.000001||y+h>1.000001||w<0.06||h<0.06)throw Error('Person-removal rectangle is outside the frame or too small');
+ return {x,y,w,h};
+}
+export function nativePersonMask(png,region){
+ const {x,y,w,h}=validEraseRegion(region);
+ const source=PNG.sync.read(png);
+ if(source.width>4096||source.height>4096)throw Error('Mask frame exceeds size limit');
+ const out=new PNG({width:source.width,height:source.height});
+ const x1=Math.floor(x*source.width),y1=Math.floor(y*source.height);
+ const x2=Math.ceil((x+w)*source.width),y2=Math.ceil((y+h)*source.height);
+ for(let py=0;py<source.height;py++)for(let px=0;px<source.width;px++){
+  const at=(py*source.width+px)*4;
+  out.data[at]=255;out.data[at+1]=255;out.data[at+2]=255;
+  out.data[at+3]=(px>=x1&&px<x2&&py>=y1&&py<y2)?0:255;
+ }
+ return PNG.sync.write(out);
+}
 const PNG_MAGIC=Buffer.from([137,80,78,71,13,10,26,10]);
 const IMAGE_LIMIT=25*1024*1024;
 const STARTING_OUTPUT_LOW={square:0.009,landscape:0.013,portrait:0.013};
@@ -28,13 +50,15 @@ export function videoSwapSettings(input){
  if(!VIDEO_MODELS.includes(model))throw Error('Unsupported GPT Image video-swap model');
  if(!VIDEO_QUALITIES.includes(quality))throw Error('Choose low, medium or high image quality');
  return {fps,quality,model,imageProvider,prompt:String(input.prompt||'').slice(0,1600),
-   preserveAudio:input.preserveAudio!==false,continuity:input.continuity!==false};
+   preserveAudio:input.preserveAudio!==false,continuity:input.continuity!==false,
+   maskedReplace:input.maskedReplace===true};
 }
-export function videoFramePrompt(index,custom='',continuity=true){
+export function videoFramePrompt(index,custom='',continuity=true,masked=false){
  const base='Edit Image 1 (the CURRENT ORIGINAL VIDEO FRAME). Completely remove the original visible person and replace their ENTIRE appearance using Image 2 (the CHARACTER REFERENCE): face, skin details, head, hair, hat, clothing, jacket, body, hands and accessories. Do not leave any traces of the original actor\'s face, clothes, colours or accessories. Match ONLY the original actor\'s pose, expression, head angle, mouth shape, body position, scale and motion instant from Image 1. Preserve the source video\'s background, camera position, perspective, scene, lighting and objects. Do not create a new scene. ';
+ const maskGuide=masked?'The native transparent PERSON REMOVAL MASK on Image 1 marks the ENTIRE old actor for DELETION AND REPLACEMENT, not enhancement. Fill the entire selected area with the new character from Image 2 and, for later frames, Image 3. NO original clothing, face, hat, jacket, skin, or accessories must survive. Recreate missing background if necessary, without moving anything outside the mask. ':' ';
  const anchor=index>1?'Image 3 is the LOCKED APPROVED FIRST EDITED FRAME: it shows the correct finished replacement person. It is the PRIMARY visual authority for the new character\'s identity and appearance, including face, hair, clothing and accessories. Match Image 3\'s replacement character exactly, but NEVER copy its pose, motion moment or background: those come ONLY from Image 1. ':'';
  const previous=index>2&&continuity?'Image 4 is the PREVIOUS EDITED FRAME, a SECONDARY guide for smooth changes from the previous moment. If it disagrees with Image 3 about the correct clothing, face or appearance, ALWAYS follow Image 3. Do not borrow motion or pose from Image 4. ':'';
- return (base+anchor+previous+custom).slice(0,3200);
+ return (base+maskGuide+anchor+previous+custom).slice(0,3200);
 }
 export function frameOutputSize(width,height){
  return width>height?'1536x1024':width<height?'1024x1536':'1024x1024';
@@ -71,6 +95,7 @@ function receipt(job){
   duration:job.duration,outputSize:job.size,quality:job.quality,model:job.model,imageProvider:job.imageProvider||'piapi',
   completedFrames:job.completedFrames||0,paidSubmissions:job.paidSubmissions||0,
   anchorLocked:!!job.anchorLocked,continuity:job.continuity!==false,
+  maskedReplace:!!job.maskedReplace,eraseRegion:job.eraseRegion||null,
   minOutputOnly:job.minOutputOnly,stage:job.stage||'',sourceHadAudio:job.preserveAudio,
   preview:job.completedFrames>=1?'/api/video-swap/'+job.id+'/preview':null,
   video:job.status==='completed'?'/api/video-swap/'+job.id+'/download':null};
@@ -110,9 +135,16 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   const character=await asset(job.characterId);
   if(!['image/png','image/jpeg','image/webp'].includes(character.mime)||character.bytes.length>IMAGE_LIMIT)throw Error('Character reference expired or invalid');
   const form=new FormData();
-  form.append('model',job.model);form.append('prompt',videoFramePrompt(index,job.prompt,job.continuity));
+  form.append('model',job.model);form.append('prompt',videoFramePrompt(index,job.prompt,job.continuity,!!job.maskedReplace));
   form.append('quality',job.quality);form.append('size',job.size);form.append('n','1');form.append('output_format','png');
   form.append('image[]',new Blob([base],{type:'image/png'}),'original-frame-'+index+'.png');
+  if(job.maskedReplace){
+   // Native transparent mask must match the FIRST input exactly. The user
+   // marks a generously sized static region covering the old actor's full
+   // motion. Without that region we never submit a paid image edit.
+   const mask=nativePersonMask(base,job.eraseRegion);
+   form.append('mask',new Blob([mask],{type:'image/png'}),'remove-entire-original-person.png');
+  }
   form.append('image[]',new Blob([character.bytes],{type:character.mime}),character.name||'character.png');
   if(index>1){
    // The first approved result stays immutable as our master character guide.
@@ -182,7 +214,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   if(video.size>100*1024*1024)throw Error('Video too large');
   if(!['image/png','image/jpeg','image/webp'].includes(character.mime)||character.size>IMAGE_LIMIT)throw Error('Upload a JPG, PNG or WebP character reference under 25MB');
   const id=randomUUID(),dir=folder(id);
-  const job={id,...opts,videoId:input.videoId,characterId:input.characterId,status:'preparing',stage:'Extracting frames — no PiAPI credits used',completedFrames:0,paidSubmissions:0,stop:false};
+  const job={id,...opts,videoId:input.videoId,characterId:input.characterId,status:'preparing',stage:'Extracting frames — no provider credits used',completedFrames:0,paidSubmissions:0,stop:false};
   jobs.set(id,job);await mkdir(path.join(dir,'frames'),{recursive:true});await mkdir(path.join(dir,'edited'),{recursive:true});
   await save(job);active=id;
   void (async()=>{
@@ -209,10 +241,20 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
     job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
     job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
     job.minOutputOnly=opts.imageProvider==='piapi'?minimumOutputEstimate(files.length,width,height,opts.quality,opts.model):null;
-    await setStatus(job,'ready','Prepared '+job.frames+' frames · no PiAPI charge');
+    await setStatus(job,'ready',job.maskedReplace?'Prepared '+job.frames+' frames · draw a FULL person-removal zone before preview (FREE)':'Prepared '+job.frames+' frames · no API charge');
    }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no credits spent');}
    finally{if(active===id)active=null;}
   })();
+  return receipt(job);
+ }
+ async function setEraseRegion(id,region){
+  const job=await safeJob(id);
+  if(active)throw Error('Cannot change the removal area during processing');
+  if(job.status!=='ready'||job.paidSubmissions)throw Error('The removal area can only be set before the first paid edit. Prepare a new job to change it.');
+  if(!job.maskedReplace)throw Error('Prepare with Remove & Replace mode enabled');
+  job.eraseRegion=validEraseRegion(region);
+  job.stage='Person-removal region saved (FREE). Check first, middle and last source frame before paying.';
+  await save(job);
   return receipt(job);
  }
  async function preview(id){
@@ -220,6 +262,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   if(active)throw Error('Another video-swap operation is in progress');
   if((job.imageProvider||'piapi')==='openai'?!openaiKey:!piapiKey)throw Error('Selected image provider API key is not configured in Render');
   if(job.status!=='ready')throw Error('Finish preparation first. Preview requires a prepared job.');
+  if(job.maskedReplace&&!job.eraseRegion)throw Error('Draw and save a person-removal area before spending credits. It must cover the old actor throughout the clip.');
   active=id;await setStatus(job,'previewing','Editing frame 1 · paid PiAPI request');
   void (async()=>{try{
    await submitOne(job,1);await setStatus(job,'preview_ready','Review frame 1, then explicitly approve the remaining '+(job.frames-1)+' edits');
@@ -232,6 +275,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   if(active)throw Error('Another video-swap operation is in progress');
   if((job.imageProvider||'piapi')==='openai'?!openaiKey:!piapiKey)throw Error('Selected image provider API key is not configured in Render');
   if(!['preview_ready','interrupted','failed'].includes(job.status)||!job.completedFrames)throw Error('Approve the first-frame preview before processing more frames');
+  if(job.maskedReplace&&!job.eraseRegion)throw Error('The original person-removal region is missing: no paid edits permitted');
   if(job.currentTask)throw Error('A previous PiAPI task may still be running or billed ('+job.currentTask+'). Check its status in PiAPI before resuming.');
   if(job.completedFrames>=job.frames)throw Error('All frames already processed');
   // Migrate in-progress jobs from before the fixed anchor was introduced.
@@ -274,6 +318,14 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
  async function stream(id,kind,res){
   const job=await safeJob(id);
   if(kind==='preview'&&job.completedFrames<1)throw Error('Preview image is not ready');
+  if(['source-first','source-middle','source-last'].includes(kind)){
+   if(!job.frames)throw Error('Video frames not prepared');
+   const frame=kind==='source-first'?1:kind==='source-middle'?Math.ceil(job.frames/2):job.frames;
+   const file=path.join(folder(id),'frames',frameName(frame));
+   const info=await stat(file);
+   res.writeHead(200,{'Content-Type':'image/png','Content-Length':info.size,'Cache-Control':'private,no-store'});
+   return createReadStream(file).pipe(res);
+  }
   if(kind==='download'&&job.status!=='completed')throw Error('Final MP4 not ready');
   const file=kind==='preview'?path.join(folder(id),'edited','000001.png'):path.join(folder(id),'result.mp4');
   const info=await stat(file);
@@ -281,5 +333,5 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
    'Content-Disposition':kind==='download'?'attachment; filename="filmbuilder-character-swap.mp4"':'inline','Cache-Control':'private,no-store','Accept-Ranges':'none'});
   createReadStream(file).pipe(res);
  }
- return {prepare,preview,continueJob,cancel,status,stream};
+ return {prepare,preview,continueJob,cancel,status,stream,setEraseRegion};
 }
