@@ -55,6 +55,24 @@ async function waitFor(controller,id,states,timeout=12000){
  throw Error('Timed out waiting for '+states.join('/')+': '+JSON.stringify(await controller.status(id)));
 }
 const root=await mkdtemp(path.join(os.tmpdir(),'filmbuilder-video-test-'));
+async function approveRemainingAfterSample(controller,id){
+ await assert.rejects(()=>controller.continueJob(id,'full'),/4-frame motion sample/,'Cannot skip the motion-test credit gate');
+ await controller.continueJob(id,'sample');
+ const motion=await waitFor(controller,id,['sample_ready','completed','failed'],45000);
+ assert.notEqual(motion.status,'failed',motion.error);
+ assert.equal(motion.completedFrames,Math.min(4,motion.frames),'Paid preview + 3 motion-test edits only');
+ assert.equal(motion.paidSubmissions,Math.min(4,motion.frames),'No additional paid edits before second approval');
+ if(motion.frames>4){
+  assert.equal(motion.status,'sample_ready','Must stop after 4 frames before full-video run');
+  assert.equal(motion.previewFrames,4,'Joining video progress as paid frames finish');
+  assert.match(motion.progressVideo,/\/progress\?frames=4$/);
+  const clip=path.join(root,'video-swap-'+id,'progress.mp4');
+  assert.ok((await stat(clip)).size>1000,'Video snapshot must be a real playable MP4');
+  await assert.rejects(()=>controller.continueJob(id,'sample'),/Motion sample completed/,'Cannot buy more frames as sample');
+  await controller.continueJob(id,'full');
+ }
+ return motion;
+}
 try{
  const ffmpeg=require('@ffmpeg-installer/ffmpeg').path;
  const vid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',img='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -115,9 +133,10 @@ try{
  assert.match(observed[0].prompt,/CURRENT ORIGINAL VIDEO FRAME/);
  assert.ok(!observed[0].prompt.includes('Image 3'));
  const fakeRes={headers:null,body:null,writeHead(code,headers){this.headers={code,...headers};},end(data){this.body=data;}};
- const approval=await controller.continueJob(started.id);
- assert.equal(approval.status,'running');
- const completed=await waitFor(controller,started.id,['completed','failed'],30000);
+ const approvedSample=await approveRemainingAfterSample(controller,started.id);
+ assert.equal(approvedSample.previewFrames,4,'The visible clip reaches exactly 4 frames before full approval');
+ assert.equal(observed.length,4,'Cannot waste 82 credits before checking motion');
+ const completed=await waitFor(controller,started.id,['completed','failed'],45000);
  assert.equal(completed.status,'completed',completed.error);
  assert.equal(completed.completedFrames,8);
  assert.equal(completed.paidSubmissions,8);
@@ -151,8 +170,8 @@ try{
  await controller.preview(rotatedStarted.id);
  const portraitPreview=await waitFor(controller,rotatedStarted.id,['preview_ready','failed']);
  assert.equal(portraitPreview.status,'preview_ready',portraitPreview.error);
- await controller.continueJob(rotatedStarted.id);
- const portraitComplete=await waitFor(controller,rotatedStarted.id,['completed','failed'],45000);
+ await approveRemainingAfterSample(controller,rotatedStarted.id);
+ const portraitComplete=await waitFor(controller,rotatedStarted.id,['completed','failed'],90000);
  assert.equal(portraitComplete.status,'completed',portraitComplete.error);
  assert.equal(portraitComplete.completedFrames,30);
  const finalFirst=path.join(root,'portrait-final-first.png');
@@ -195,8 +214,8 @@ try{
  assert.equal(directCalls.length,1,'Direct preview only one API POST');
  assert.equal(directCalls[0].files,2,'First direct edit uses source+character');
  assert.equal(directCalls[0].model,'gpt-image-1.5');
- await direct.continueJob(directPrep.id);
- const directFull=await waitFor(direct,directPrep.id,['completed','failed'],30000);
+ await approveRemainingAfterSample(direct,directPrep.id);
+ const directFull=await waitFor(direct,directPrep.id,['completed','failed'],45000);
  assert.equal(directFull.status,'completed',directFull.error);
  assert.equal(directFull.paidSubmissions,8);
  assert.equal(directCalls.length,8,'Direct sends one request per original frame only');
@@ -211,8 +230,8 @@ try{
  assert.equal(fullReady.status,'ready',fullReady.error);
  await direct.preview(fullPrep.id);
  assert.equal((await waitFor(direct,fullPrep.id,['preview_ready','failed'])).status,'preview_ready');
- await direct.continueJob(fullPrep.id);
- const fullResult=await waitFor(direct,fullPrep.id,['completed','failed'],30000);
+ await approveRemainingAfterSample(direct,fullPrep.id);
+ const fullResult=await waitFor(direct,fullPrep.id,['completed','failed'],45000);
  assert.equal(fullResult.status,'completed',fullResult.error);
  assert.equal(directCalls.at(-6).files,4,'Direct max-consistency fourth image included from frame 3');
  assert.deepEqual(directCalls.at(-6).names,['original-frame-3.png','character.png','locked-first-approved-frame.png','previous-edited-frame.png']);
@@ -269,13 +288,13 @@ try{
  assert.equal((await waitFor(maskedController,maskStarted.id,['preview_ready','failed'])).status,'preview_ready');
  assert.equal(maskCalls.length,1);
  await assert.rejects(()=>maskedController.setEraseRegion(maskStarted.id,region),/before the first paid edit/,'Cannot silently change area mid-job');
- await maskedController.continueJob(maskStarted.id);
- const maskedFinal=await waitFor(maskedController,maskStarted.id,['completed','failed'],30000);
+ await approveRemainingAfterSample(maskedController,maskStarted.id);
+ const maskedFinal=await waitFor(maskedController,maskStarted.id,['completed','failed'],45000);
  assert.equal(maskedFinal.status,'completed',maskedFinal.error);
  assert.equal(maskCalls.length,8,'One native mask for every original video frame, no extra paid passes');
  assert.equal(maskCalls[1].images,3,'Direct strict economy mode still has 3 reference images');
  assert.equal(maskedFinal.paidSubmissions,8);
- console.log('Strict Remove & Replace: native alpha mask per frame, approval gate, complete actor-zone selection and zero unpaid requests passed');
+ console.log('Strict Remove & Replace: native alpha mask per frame, 4-frame motion stop, approval gate and no extra paid calls passed');
 
 
 }finally{await rm(root,{recursive:true,force:true});}
