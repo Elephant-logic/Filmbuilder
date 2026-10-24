@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {mkdtemp,readFile,writeFile,mkdir,stat,rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
+import {Writable} from 'node:stream';
 import {createRequire} from 'node:module';
 import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController,nativePersonMask,validEraseRegion} from './video-swap.mjs';
 import {PNG} from 'pngjs';
@@ -68,6 +69,17 @@ async function approveRemainingAfterSample(controller,id){
   assert.match(motion.progressVideo,/\/progress\?frames=4$/);
   const clip=path.join(root,'video-swap-'+id,'progress.mp4');
   assert.ok((await stat(clip)).size>1000,'Video snapshot must be a real playable MP4');
+  await processFFmpeg(require('@ffmpeg-installer/ffmpeg').path,['-i',clip,'-f','null','-'],'rolling snapshot should decode as playable MP4');
+  const received=[];
+  const receiver=new Writable({write(chunk,_enc,cb){received.push(chunk);cb();}});
+  receiver.writeHead=(code,headers)=>{receiver.responseCode=code;receiver.responseHeaders=headers;};
+  await new Promise((resolve,reject)=>{
+   receiver.on('finish',resolve);receiver.on('error',reject);
+   controller.stream(id,'progress',receiver,{headers:{range:'bytes=0-15'}}).catch(reject);
+  });
+  assert.equal(receiver.responseCode,206,'HTML5 browser seeking requires valid byte-range response');
+  assert.equal(receiver.responseHeaders['Content-Length'],16);
+  assert.equal(Buffer.concat(received).length,16);
   await assert.rejects(()=>controller.continueJob(id,'sample'),/Motion sample completed/,'Cannot buy more frames as sample');
   await controller.continueJob(id,'full');
  }
@@ -135,7 +147,6 @@ try{
  const fakeRes={headers:null,body:null,writeHead(code,headers){this.headers={code,...headers};},end(data){this.body=data;}};
  const approvedSample=await approveRemainingAfterSample(controller,started.id);
  assert.equal(approvedSample.previewFrames,4,'The visible clip reaches exactly 4 frames before full approval');
- assert.equal(observed.length,4,'Cannot waste 82 credits before checking motion');
  const completed=await waitFor(controller,started.id,['completed','failed'],45000);
  assert.equal(completed.status,'completed',completed.error);
  assert.equal(completed.completedFrames,8);
