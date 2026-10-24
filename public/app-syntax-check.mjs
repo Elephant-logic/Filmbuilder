@@ -6,6 +6,14 @@ const page=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
 const pieces=page.match(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/i);
 if(!pieces)throw Error('Missing app JavaScript');
 new vm.Script(pieces[1],{filename:'public/index.html <script>'});
+// Mobile must not trap the video-swap mask and controls in a 45vh nested
+// scrolling workspace behind the GPT chat composer (regression test).
+assert.match(page,/\.shell\{display:block;height:auto;min-height:100dvh\}/,'Mobile uses a single scrollable document');
+assert.match(page,/\.workspace\{height:auto;min-height:0;max-height:none;overflow:visible/,'Mobile studio must remain visible and scroll with the page');
+assert.match(page,/id="vsJumpMask"/,'Ready jobs need an obvious free mark-person button');
+assert.match(page,/\$\('vsJumpMask'\)\.onclick/,'Mark-person button must navigate to selection canvas');
+assert.match(page,/id="vsJobDetails"/,'Verbose status must not hide the next step');
+console.log('Mobile Video Swap scroll and person-removal navigation checks passed');
 console.log('Browser script syntax passed');
 
 const server=readFileSync(new URL('../server.mjs',import.meta.url),'utf8');
