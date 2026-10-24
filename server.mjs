@@ -580,7 +580,7 @@ if(req.method==='GET'&&route==='/api/config')return send(res,200,{gpt:!!OPENAI,p
 if(req.method==='GET'&&route.startsWith('/api/video-swap/')){
  const bits=route.slice('/api/video-swap/'.length).split('/');
  if(bits.length===1)return send(res,200,await videoSwap.status(bits[0]));
- if(bits.length===2&&['preview','download'].includes(bits[1]))return await videoSwap.stream(bits[0],bits[1],res);
+ if(bits.length===2&&['preview','download','source-first','source-middle','source-last'].includes(bits[1]))return await videoSwap.stream(bits[0],bits[1],res);
  throw bad('Unknown video-swap resource',404);
 }
 if(req.method==='GET'&&route.startsWith('/api/media/'))return await streamMedia(req,res,route.split('/').pop());
@@ -608,6 +608,7 @@ if(route==='/api/upload-file')return send(res,200,await uploadBinary(req));
 if(route==='/api/host'){const b=await json(req);if(typeof b?.id!=='string')throw bad('Provide an uploaded file ID');return send(res,200,await hostedReference(b.id));}
 if(route==='/api/chat')return send(res,200,await chat(await json(req)));
 if(route==='/api/video-swap/prepare')return send(res,200,await videoSwap.prepare(await json(req)));
+if(route==='/api/video-swap/region'){const b=await json(req);return send(res,200,await videoSwap.setEraseRegion(b.id,b.region));}
 if(route==='/api/video-swap/preview'){const b=await json(req);return send(res,200,await videoSwap.preview(b.id));}
 if(route==='/api/video-swap/continue'){const b=await json(req);return send(res,200,await videoSwap.continueJob(b.id));}
 if(route==='/api/video-swap/cancel'){const b=await json(req);return send(res,200,await videoSwap.cancel(b.id));}
