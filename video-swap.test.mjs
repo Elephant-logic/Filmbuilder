@@ -5,11 +5,12 @@ import {mkdtemp,readFile,writeFile,mkdir,stat,rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {Writable} from 'node:stream';
 import {createRequire} from 'node:module';
-import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController,nativePersonMask,validEraseRegion} from './video-swap.mjs';
+import {MAX_VIDEO_FRAMES,PREPARATION_TIMEOUT_MS,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController,nativePersonMask,validEraseRegion} from './video-swap.mjs';
 import {PNG} from 'pngjs';
 
 const require=createRequire(import.meta.url);
 assert.equal(MAX_VIDEO_FRAMES,300);
+assert.ok(PREPARATION_TIMEOUT_MS>=300000,'On very low CPU Render, frame preparation should not be aborted after 90s');
 assert.equal(videoSwapSettings({}).fps,24,'24 fps is the smooth default');
 assert.equal(videoSwapSettings({}).imageProvider,'piapi','Legacy requests remain PiAPI');
 assert.equal(videoSwapSettings({maskedReplace:true}).maskedReplace,true);
@@ -129,6 +130,19 @@ try{
  const ready=await waitFor(controller,started.id,['ready','failed']);
  assert.equal(ready.status,'ready',ready.error);
  assert.equal(ready.frames,8);
+ assert.equal(ready.extractedFrames,8,'All source frames were decoded into PNG before first charge');
+ assert.equal(ready.sourcePreviewReady,true,'Extracted frame 1 is available for free inspection');
+ assert.equal(ready.paidSubmissions,0,'FFmpeg extraction must never trigger an image edit');
+ // The PNG preview can be inspected through the existing authenticated
+ // source-frame endpoint, without ever submitting a paid image edit.
+ const originalBytes=[];
+ const originalReceiver=new Writable({write(chunk,_enc,done){originalBytes.push(chunk);done();}});
+ originalReceiver.writeHead=(code,headers)=>{assert.equal(code,200);assert.equal(headers['Content-Type'],'image/png');};
+ await new Promise((resolve,reject)=>{
+  originalReceiver.on('finish',resolve);originalReceiver.on('error',reject);
+  controller.stream(started.id,'source-first',originalReceiver).catch(reject);
+ });
+ assert.deepEqual(Buffer.concat(originalBytes).subarray(0,8),Buffer.from([137,80,78,71,13,10,26,10]));
  assert.equal(ready.minOutputOnly,0.104);
  assert.equal(ready.paidSubmissions,0);
  variedVideoFrames=await Promise.all(Array.from({length:8},(_,i)=>readFile(path.join(root,'video-swap-'+started.id,'frames',String(i+1).padStart(6,'0')+'.png'))));
