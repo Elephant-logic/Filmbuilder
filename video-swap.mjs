@@ -12,6 +12,9 @@ const require=createRequire(import.meta.url);
 const {PNG}=require('pngjs');
 export const MAX_VIDEO_FRAMES=300;
 export const MAX_VIDEO_SECONDS=10;
+// Free Render has a fraction of one CPU; decoding phone video to PNG can
+// legitimately take minutes. Never bill an image edit during preparation.
+export const PREPARATION_TIMEOUT_MS=360000;
 export const ALLOWED_FPS=[8,12,24,30];
 export const VIDEO_MODELS=['gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'];
 export const VIDEO_QUALITIES=['low','medium','high'];
@@ -74,13 +77,33 @@ function ffmpegBinary(){
  try{const f=require('@ffmpeg-installer/ffmpeg');if(f.path)return f.path;}catch{}
  return 'ffmpeg';
 }
-function runFFmpeg(args,timeoutMs=120000){
+function runFFmpeg(args,timeoutMs=120000,onProgress=null){
  return new Promise((resolve,reject)=>{
   const child=spawn(ffmpegBinary(),['-hide_banner','-nostdin','-y',...args],{stdio:['ignore','ignore','pipe']});
-  let errors='';const timer=setTimeout(()=>{child.kill('SIGKILL');reject(Error('Video operation exceeded time limit'));},timeoutMs);
-  child.stderr.on('data',data=>{errors=(errors+data.toString()).slice(-16000);});
-  child.on('error',err=>{clearTimeout(timer);reject(Error('FFmpeg unavailable: '+err.message+'. Check server binary installation.'));});
-  child.on('close',code=>{clearTimeout(timer);if(code===0)resolve(errors);else reject(Error('FFmpeg failed: '+errors.slice(-800)));});
+  let errors='',progressText='',lastReported=0,settled=false;
+  const fail=e=>{if(!settled){settled=true;reject(e);}};
+  const timer=setTimeout(()=>{
+   child.kill('SIGKILL');
+   fail(Error('Video frame extraction timed out after '+Math.round(timeoutMs/1000)+' seconds. Try 8 FPS or a shorter/lower-resolution MP4. No image API credits were charged.'));
+  },timeoutMs);
+  child.stderr.on('data',data=>{
+   const chunk=data.toString();
+   errors=(errors+chunk).slice(-16000);
+   if(onProgress){
+    progressText=(progressText+chunk).slice(-2048);
+    const lines=progressText.split(/\r?\n/);
+    progressText=lines.pop()||'';
+    for(const line of lines){
+     const match=/^frame=\s*(\d+)/.exec(line);
+     if(match&&Number(match[1])>lastReported){
+      lastReported=Number(match[1]);
+      try{onProgress(lastReported);}catch{}
+     }
+    }
+   }
+  });
+  child.on('error',err=>{clearTimeout(timer);fail(Error('FFmpeg unavailable: '+err.message+'. Check server binary installation.'));});
+  child.on('close',code=>{clearTimeout(timer);if(settled)return;settled=true;if(code===0)resolve(errors);else reject(Error('FFmpeg failed: '+errors.slice(-800)));});
  });
 }
 function frameName(n){return String(n).padStart(6,'0')+'.png';}
@@ -96,6 +119,7 @@ function receipt(job){
   completedFrames:job.completedFrames||0,paidSubmissions:job.paidSubmissions||0,
   anchorLocked:!!job.anchorLocked,continuity:job.continuity!==false,
   maskedReplace:!!job.maskedReplace,eraseRegion:job.eraseRegion||null,
+  extractedFrames:job.extractedFrames||0,sourcePreviewReady:!!job.sourcePreviewReady,
   previewFrames:job.previewFrames||0,progressVideo:job.previewFrames>=2?'/api/video-swap/'+job.id+'/progress?frames='+job.previewFrames:null,
   motionSampleTarget:Math.min(4,job.frames||4),
   minOutputOnly:job.minOutputOnly,stage:job.stage||'',sourceHadAudio:job.preserveAudio,
@@ -236,9 +260,22 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   await save(job);active=id;
   void (async()=>{
    try{
-    // Source duration is checked again against extracted-frame count before ANY paid edit.
+    // Source duration is checked again against extracted-frame count BEFORE
+    // any paid edit. Limit FFmpeg threads for a 0.15 CPU Render instance, use
+    // fast scaler / fast PNG compression, and expose actual extraction count
+    // during preparation so the phone UI doesn't appear to be frozen.
     const src=path.join(storage,video.id+'.bin');
-    await runFFmpeg(['-i',src,'-vf','fps='+opts.fps+',scale=640:640:force_original_aspect_ratio=decrease','-frames:v',String(MAX_VIDEO_FRAMES+1),path.join(dir,'frames','%06d.png')],90000);
+    if(Number.isFinite(video.duration)&&video.duration>MAX_VIDEO_SECONDS+0.25)
+     throw Error('Source video is over 10 seconds; trim before paying. No image API credits charged.');
+    await runFFmpeg([
+     '-filter_threads','1','-threads','1','-i',src,
+     '-an','-vf','fps='+opts.fps+',scale=640:640:force_original_aspect_ratio=decrease:flags=fast_bilinear',
+     '-pix_fmt','rgb24','-compression_level','1','-frames:v',String(MAX_VIDEO_FRAMES+1),
+     '-progress','pipe:2','-nostats',path.join(dir,'frames','%06d.png')
+    ],PREPARATION_TIMEOUT_MS,frames=>{
+     job.extractedFrames=frames;job.sourcePreviewReady=frames>=1;
+     job.stage='Extracting source frames: '+frames+' complete at '+opts.fps+' fps (FREE; no AI credits used)';
+    });
     const files=(await readdir(path.join(dir,'frames'))).filter(n=>/^\d{6}\.png$/.test(n)).sort();
     if(!files.length)throw Error('Video had no readable frames');
     if(files.length>MAX_VIDEO_FRAMES)throw Error('Clip has more than '+MAX_VIDEO_FRAMES+' sampled frames. Trim it or choose a lower FPS; no paid requests were made.');
@@ -253,13 +290,14 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
     if(header.length<24||!header.subarray(0,8).equals(PNG_MAGIC))throw Error('Extracted first frame was not a valid PNG');
     const width=header.readUInt32BE(16),height=header.readUInt32BE(20);
     if(width<16||height<16||width>8192||height>8192)throw Error('Invalid extracted video dimensions');
-    job.frames=files.length;job.duration=+duration.toFixed(2);job.size=frameOutputSize(width,height);
+    job.frames=files.length;job.extractedFrames=files.length;job.sourcePreviewReady=true;
+    job.duration=+duration.toFixed(2);job.size=frameOutputSize(width,height);
     const scale=Math.min(2,1280/Math.max(width,height));
     job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
     job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
     job.minOutputOnly=opts.imageProvider==='piapi'?minimumOutputEstimate(files.length,width,height,opts.quality,opts.model):null;
     await setStatus(job,'ready',job.maskedReplace?'Prepared '+job.frames+' frames · draw a FULL person-removal zone before preview (FREE)':'Prepared '+job.frames+' frames · no API charge');
-   }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no credits spent');}
+   }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no image API credits spent. You may choose 8 FPS and prepare again.');}
    finally{if(active===id)active=null;}
   })();
   return receipt(job);
@@ -348,7 +386,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   const job=await safeJob(id);
   if(kind==='preview'&&job.completedFrames<1)throw Error('Preview image is not ready');
   if(['source-first','source-middle','source-last'].includes(kind)){
-   if(!job.frames)throw Error('Video frames not prepared');
+   if(!job.frames&&!(kind==='source-first'&&job.sourcePreviewReady))throw Error('Source frame is not extracted yet');
    const frame=kind==='source-first'?1:kind==='source-middle'?Math.ceil(job.frames/2):job.frames;
    const file=path.join(folder(id),'frames',frameName(frame));
    const info=await stat(file);
