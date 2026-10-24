@@ -14,6 +14,7 @@ export const MAX_VIDEO_SECONDS=10;
 export const ALLOWED_FPS=[8,12,24,30];
 export const VIDEO_MODELS=['gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'];
 export const VIDEO_QUALITIES=['low','medium','high'];
+export const IMAGE_PROVIDERS=['piapi','openai'];
 const PNG_MAGIC=Buffer.from([137,80,78,71,13,10,26,10]);
 const IMAGE_LIMIT=25*1024*1024;
 const STARTING_OUTPUT_LOW={square:0.009,landscape:0.013,portrait:0.013};
@@ -21,10 +22,12 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 export function videoSwapSettings(input){
  const fps=Number(input.fps||24),quality=String(input.quality||'low'),model=String(input.model||'gpt-image-1.5');
+ const imageProvider=String(input.imageProvider||'piapi');
+ if(!IMAGE_PROVIDERS.includes(imageProvider))throw Error('Choose PiAPI or OpenAI Direct');
  if(!ALLOWED_FPS.includes(fps))throw Error('Choose 8, 12, 24 or 30 output frames per second');
  if(!VIDEO_MODELS.includes(model))throw Error('Unsupported GPT Image video-swap model');
  if(!VIDEO_QUALITIES.includes(quality))throw Error('Choose low, medium or high image quality');
- return {fps,quality,model,prompt:String(input.prompt||'').slice(0,1600),
+ return {fps,quality,model,imageProvider,prompt:String(input.prompt||'').slice(0,1600),
    preserveAudio:input.preserveAudio!==false,continuity:input.continuity!==false};
 }
 export function videoFramePrompt(index,custom='',continuity=true){
@@ -65,14 +68,14 @@ const imageRef=async id=>{
 };
 function receipt(job){
  return {id:job.id,status:job.status,error:job.error||'',fps:job.fps,frames:job.frames,
-  duration:job.duration,outputSize:job.size,quality:job.quality,model:job.model,
+  duration:job.duration,outputSize:job.size,quality:job.quality,model:job.model,imageProvider:job.imageProvider||'piapi',
   completedFrames:job.completedFrames||0,paidSubmissions:job.paidSubmissions||0,
   anchorLocked:!!job.anchorLocked,continuity:job.continuity!==false,
   minOutputOnly:job.minOutputOnly,stage:job.stage||'',sourceHadAudio:job.preserveAudio,
   preview:job.completedFrames>=1?'/api/video-swap/'+job.id+'/preview':null,
   video:job.status==='completed'?'/api/video-swap/'+job.id+'/download':null};
 }
-export function createVideoSwapController({storage,asset,piapiKey,provider,pollIntervalMs=5000}){
+export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',provider,pollIntervalMs=5000}){
  const jobs=new Map();
  let active=null;
  const folder=id=>path.join(storage,'video-swap-'+id);
@@ -98,7 +101,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
    if(bytes.length>IMAGE_LIMIT||!bytes.subarray(0,8).equals(PNG_MAGIC))throw Error('GPT Image output was not a valid PNG');
    return bytes;
   }
-  throw Error('PiAPI task completed without a base64 PNG image; no automatic paid retry will occur');
+  throw Error('Image edit returned no valid base64 PNG; no automatic paid retry');
  }
  async function submitOne(job,index){
   if(job.stop)throw Error('Cancelled by user');
@@ -123,42 +126,54 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
     form.append('image[]',new Blob([previous],{type:'image/png'}),'previous-edited-frame.png');
    }
   }
-  // Count a possible billable request BEFORE the provider call. A gateway
-  // timeout does not prove PiAPI failed to charge; we never automatically retry.
+  // Record a potential charge BEFORE calling either API. A timeout can still
+  // be charged, and neither account should receive automatic paid retries.
   job.paidSubmissions=(job.paidSubmissions||0)+1;await save(job);
-  const submitted=await provider('https://api.piapi.ai/api/v1/images/edits/async',
-   {method:'POST',headers:{'X-API-Key':piapiKey},body:form},45000);
-  const created=submitted.data?.task_id?submitted.data:submitted;
-  const taskId=created.task_id||created.id;
-  if(typeof taskId!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(taskId))throw Error('PiAPI did not return a task ID. Check PiAPI history before resuming: a charge might have occurred.');
-  job.currentTask=taskId;await save(job);
-  let response;
-  for(let n=0;n<100;n++){
-   if(job.stop)throw Error('Cancelled by user. An already-submitted PiAPI task may still be billed');
-   await sleep(pollIntervalMs);
-   response=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(taskId),
-    {headers:{'X-API-Key':piapiKey}},30000);
-   const data=response.data&&typeof response.data==='object'?response.data:response;
-   const status=String(data.status||'').toLowerCase();
-   if(status==='completed'){
-    const image=getImageResult(data.output||{});
-    await writeFile(path.join(dir,'edited',frameName(index)),image,{mode:0o600});
-    if(index===1){
-     // Write-once locked first frame. It is not overwritten as later frames
-     // change, even when the job is resumed after a failed paid edit.
-     await writeFile(path.join(dir,'anchor.png'),image,{flag:'wx',mode:0o600});
-     job.anchorLocked=true;
+  let image;
+  if((job.imageProvider||'piapi')==='openai'){
+   // Direct OpenAI edits return the PNG synchronously. 2/3/4 input images
+   // are sent in the same order as PiAPI. Do not use PiAPI task polling.
+   // Persist an uncertain in-flight marker to prevent accidental resubmission
+   // if the server restarts or the request fails after charging.
+   job.currentTask='openai-direct-outcome-unknown';await save(job);
+   let response;
+   try{
+    response=await provider('https://api.openai.com/v1/images/edits',
+     {method:'POST',headers:{Authorization:'Bearer '+openaiKey},body:form},240000);
+   }catch(e){
+    throw Error('OpenAI Direct frame '+index+' could not be confirmed: '+String(e.message||e).slice(0,220)+'. Check OpenAI usage before retrying. No automatic paid retry.');
+   }
+   image=getImageResult(response);
+  }else{
+   const submitted=await provider('https://api.piapi.ai/api/v1/images/edits/async',
+    {method:'POST',headers:{'X-API-Key':piapiKey},body:form},45000);
+   const created=submitted.data?.task_id?submitted.data:submitted;
+   const taskId=created.task_id||created.id;
+   if(typeof taskId!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(taskId))throw Error('PiAPI task ID missing. Check PiAPI charges before restarting.');
+   job.currentTask=taskId;await save(job);
+   for(let n=0;n<100;n++){
+    if(job.stop)throw Error('Cancelled by user. Already-submitted PiAPI tasks may still be billed');
+    await sleep(pollIntervalMs);
+    const response=await provider('https://api.piapi.ai/api/v1/task/'+encodeURIComponent(taskId),
+     {headers:{'X-API-Key':piapiKey}},30000);
+    const data=response.data&&typeof response.data==='object'?response.data:response;
+    const status=String(data.status||'').toLowerCase();
+    if(status==='completed'){image=getImageResult(data.output||{});break;}
+    if(['failed','cancelled','canceled'].includes(status)){
+     job.currentTask=null;await save(job);
+     throw Error('PiAPI frame '+index+' failed: '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
     }
-    job.currentTask=null;job.completedFrames=index;await save(job);
-    return;
    }
-   if(['failed','cancelled','canceled'].includes(status)){
-    job.currentTask=null;await save(job);
-    throw Error('PiAPI failed on frame '+index+': '+String(data.output?.error_body?.error?.message||data.error?.message||data.message||'Task rejected').slice(0,300));
-   }
+   if(!image)throw Error('PiAPI task '+taskId+' timed out on frame '+index+'. No automatic paid retry.');
   }
-  throw Error('PiAPI task timed out on frame '+index+'. Task ID '+taskId+'. No automatic paid retry.');
+  await writeFile(path.join(dir,'edited',frameName(index)),image,{mode:0o600});
+  if(index===1){
+   await writeFile(path.join(dir,'anchor.png'),image,{flag:'wx',mode:0o600});
+   job.anchorLocked=true;
+  }
+  job.currentTask=null;job.completedFrames=index;await save(job);
  }
+
  async function prepare(input){
   if(active)throw Error('Another video swap is already processing; finish or cancel it first');
   const opts=videoSwapSettings(input);
@@ -193,7 +208,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
     const scale=Math.min(2,1280/Math.max(width,height));
     job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
     job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
-    job.minOutputOnly=minimumOutputEstimate(files.length,width,height,opts.quality,opts.model);
+    job.minOutputOnly=opts.imageProvider==='piapi'?minimumOutputEstimate(files.length,width,height,opts.quality,opts.model):null;
     await setStatus(job,'ready','Prepared '+job.frames+' frames · no PiAPI charge');
    }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no credits spent');}
    finally{if(active===id)active=null;}
@@ -203,6 +218,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
  async function preview(id){
   const job=await safeJob(id);
   if(active)throw Error('Another video-swap operation is in progress');
+  if((job.imageProvider||'piapi')==='openai'?!openaiKey:!piapiKey)throw Error('Selected image provider API key is not configured in Render');
   if(job.status!=='ready')throw Error('Finish preparation first. Preview requires a prepared job.');
   active=id;await setStatus(job,'previewing','Editing frame 1 · paid PiAPI request');
   void (async()=>{try{
@@ -214,6 +230,7 @@ export function createVideoSwapController({storage,asset,piapiKey,provider,pollI
  async function continueJob(id){
   const job=await safeJob(id);
   if(active)throw Error('Another video-swap operation is in progress');
+  if((job.imageProvider||'piapi')==='openai'?!openaiKey:!piapiKey)throw Error('Selected image provider API key is not configured in Render');
   if(!['preview_ready','interrupted','failed'].includes(job.status)||!job.completedFrames)throw Error('Approve the first-frame preview before processing more frames');
   if(job.currentTask)throw Error('A previous PiAPI task may still be running or billed ('+job.currentTask+'). Check its status in PiAPI before resuming.');
   if(job.completedFrames>=job.frames)throw Error('All frames already processed');

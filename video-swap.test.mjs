@@ -9,6 +9,9 @@ import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,mini
 const require=createRequire(import.meta.url);
 assert.equal(MAX_VIDEO_FRAMES,300);
 assert.equal(videoSwapSettings({}).fps,24,'24 fps is the smooth default');
+assert.equal(videoSwapSettings({}).imageProvider,'piapi','Legacy requests remain PiAPI');
+assert.equal(videoSwapSettings({imageProvider:'openai'}).imageProvider,'openai');
+assert.throws(()=>videoSwapSettings({imageProvider:'unknown'}),/PiAPI or OpenAI Direct/);
 assert.equal(videoSwapSettings({fps:30}).fps,30,'30 fps phone video setting');
 assert.deepEqual(videoSwapSettings({fps:12,model:'gpt-image-1.5',quality:'low'}).fps,12);
 assert.throws(()=>videoSwapSettings({fps:60}),/8, 12, 24 or 30/);
@@ -151,4 +154,74 @@ try{
  const finalHeader=await readFile(finalFirst);
  assert.ok(finalHeader.readUInt32BE(16)<finalHeader.readUInt32BE(20),'Rendered MP4 must remain portrait, not become landscape');
  console.log('Video character swap: 30 FPS and rotated phone-footage portrait extraction/MP4 export tests passed');
+ // OpenAI Direct: test the actual multipart fields and authorization header
+ // with a mocked synchronous OpenAI API. NO live paid provider requests.
+ const directCalls=[];
+ const directProvider=async(url,options)=>{
+  assert.equal(url,'https://api.openai.com/v1/images/edits','OpenAI mode must never touch PiAPI');
+  assert.equal(options.method,'POST');
+  assert.equal(options.headers.Authorization,'Bearer fake-openai-key');
+  assert.equal(options.headers['X-API-Key'],undefined);
+  const files=options.body.getAll('image[]');
+  directCalls.push({files:files.length,names:files.map(f=>f.name),
+   prompt:options.body.get('prompt'),quality:options.body.get('quality'),
+   size:options.body.get('size'),model:options.body.get('model'),
+   images:await Promise.all(files.map(async f=>Buffer.from(await f.arrayBuffer())))});
+  return {data:[{b64_json:exampleFrame.toString('base64')}]};
+ };
+ const direct=createVideoSwapController({storage:root,piapiKey:'',openaiKey:'fake-openai-key',provider:directProvider,
+  asset:async id=>{
+   if(id===vid)return {id:vid,mime:'video/mp4',size:(await stat(source)).size,duration:1,width:320,height:180};
+   if(id===img)return {id:img,mime:'image/png',size:exampleFrame.length,name:'character.png',bytes:exampleFrame};
+   throw Error('Unknown test asset');
+  }});
+ const directPrep=await direct.prepare({videoId:vid,characterId:img,imageProvider:'openai',model:'gpt-image-1.5',quality:'low',fps:8,continuity:false});
+ const directReady=await waitFor(direct,directPrep.id,['ready','failed']);
+ assert.equal(directReady.status,'ready',directReady.error);
+ assert.equal(directReady.imageProvider,'openai');
+ assert.equal(directReady.minOutputOnly,null,'Direct billing must not show a PiAPI-specific price');
+ assert.equal(directCalls.length,0,'Preparing frames must not charge either provider');
+ await direct.preview(directPrep.id);
+ const directFirst=await waitFor(direct,directPrep.id,['preview_ready','failed']);
+ assert.equal(directFirst.status,'preview_ready',directFirst.error);
+ assert.equal(directFirst.anchorLocked,true);
+ assert.equal(directFirst.paidSubmissions,1,'Direct preview submits only one paid edit');
+ assert.equal(directCalls.length,1,'Direct preview only one API POST');
+ assert.equal(directCalls[0].files,2,'First direct edit uses source+character');
+ assert.equal(directCalls[0].model,'gpt-image-1.5');
+ await direct.continueJob(directPrep.id);
+ const directFull=await waitFor(direct,directPrep.id,['completed','failed'],30000);
+ assert.equal(directFull.status,'completed',directFull.error);
+ assert.equal(directFull.paidSubmissions,8);
+ assert.equal(directCalls.length,8,'Direct sends one request per original frame only');
+ assert.ok(directCalls.slice(1).every(x=>x.files===3),'Economy direct sends current+character+locked first only');
+ assert.deepEqual(directCalls[1].names,['original-frame-2.png','character.png','locked-first-approved-frame.png']);
+ assert.deepEqual(directCalls[7].images[2],exampleFrame,'Direct keeps an immutable locked first frame');
+ assert.ok((await stat(path.join(root,'video-swap-'+directPrep.id,'result.mp4'))).size>1000);
+ console.log('OpenAI Direct: API route, key isolation, preview gate, fixed character anchor, economy 3-image flow, audio MP4 and no PiAPI calls passed');
+ // Verify Max consistency sends 4 images, still keeping the fixed anchor as #3.
+ const fullPrep=await direct.prepare({videoId:vid,characterId:img,imageProvider:'openai',model:'gpt-image-2.5-sunburst',quality:'low',fps:8,continuity:true});
+ const fullReady=await waitFor(direct,fullPrep.id,['ready','failed']);
+ assert.equal(fullReady.status,'ready',fullReady.error);
+ await direct.preview(fullPrep.id);
+ assert.equal((await waitFor(direct,fullPrep.id,['preview_ready','failed'])).status,'preview_ready');
+ await direct.continueJob(fullPrep.id);
+ const fullResult=await waitFor(direct,fullPrep.id,['completed','failed'],30000);
+ assert.equal(fullResult.status,'completed',fullResult.error);
+ assert.equal(directCalls.at(-6).files,4,'Direct max-consistency fourth image included from frame 3');
+ assert.deepEqual(directCalls.at(-6).names,['original-frame-3.png','character.png','locked-first-approved-frame.png','previous-edited-frame.png']);
+ console.log('OpenAI Direct: 4-image continuity mode verified with a mock provider');
+ // Missing API key must fail before the first billable submission.
+ const noKey=createVideoSwapController({storage:root,piapiKey:'',openaiKey:'',provider:directProvider,
+  asset:async id=>{
+   if(id===vid)return {id:vid,mime:'video/mp4',size:(await stat(source)).size,duration:1,width:320,height:180};
+   if(id===img)return {id:img,mime:'image/png',size:exampleFrame.length,name:'character.png',bytes:exampleFrame};
+   throw Error('Unknown asset');
+  }});
+ const missingPrep=await noKey.prepare({videoId:vid,characterId:img,imageProvider:'openai',fps:8});
+ assert.equal((await waitFor(noKey,missingPrep.id,['ready','failed'])).status,'ready');
+ await assert.rejects(()=>noKey.preview(missingPrep.id),/API key is not configured/);
+ assert.equal((await noKey.status(missingPrep.id)).paidSubmissions,0);
+ console.log('Provider key preflight prevents unconfigured paid edits');
+
 }finally{await rm(root,{recursive:true,force:true});}
