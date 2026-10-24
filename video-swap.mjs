@@ -364,7 +364,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   // even when this is a small, rapidly refreshed MP4 snapshot.
   const range=kind==='progress'?String(req?.headers?.range||''):'';
   if(range){
-   const m=/^bytes=(\\d*)-(\\d*)$/.exec(range);
+   const m=/^bytes=(\d*)-(\d*)$/.exec(range);
    if(!m){res.writeHead(416,{'Content-Range':'bytes */'+info.size});return res.end();}
    const start=m[1]?Number(m[1]):Math.max(0,info.size-Number(m[2]||0));
    const end=m[2]&&m[1]?Math.min(info.size-1,Number(m[2])):info.size-1;
