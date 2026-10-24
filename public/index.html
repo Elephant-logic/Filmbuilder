@@ -73,6 +73,11 @@
  <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and can increase input-token charges on either API. Both APIs bill each image edit individually; Direct uses OpenAI billing rather than PiAPI credits. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
  <div id="vsNextHelp" role="status" aria-live="polite">Upload your source video and character picture, then prepare frames for free.</div>
+ <div id="vsFirstSourcePanel" class="hide" style="margin:10px 0;padding:11px;background:#192844;border:1px solid #485e85;border-radius:10px">
+  <strong>Original video's first frame extracted (FREE)</strong>
+  <img id="vsFirstSourceImage" alt="Original source-video first frame, before paid character replacement" style="display:block;width:100%;height:auto;max-height:320px;object-fit:contain;margin-top:10px;border-radius:8px">
+  <p class="fine">This is the ORIGINAL actor, not the generated replacement. The remaining source frames are still being prepared. You won't be charged until you approve the paid first-frame replacement preview.</p>
+ </div>
  <button type="button" id="vsJumpMask" class="primary hide" style="width:100%">2. Mark original person for removal (FREE) ↓</button>
  <details id="vsJobDetails"><summary>Detailed job information (tap to expand)</summary>
   <div id="vsJob" class="field" style="margin-top:10px">Upload a video and character image to start.</div>
@@ -606,14 +611,22 @@ function renderVideoSwapJob(j){
   ? waitingForMask?'✅ '+j.frames+' video frames ready. 0 extra paid edits for preparation. NEXT: tap the blue button below, draw a box around the OLD person, then SAVE it for FREE.'
    : readyMasked?'✅ Person-removal area saved. NEXT: pay for ONE replacement preview frame. Check the face and clothing before approving more.'
    :'✅ '+j.frames+' video frames prepared. NEXT: pay for ONE preview frame only.'
-  : j.status==='preparing'?'Preparing video frames for free. No OpenAI or PiAPI credits are being spent.'
+  : j.status==='preparing'?(j.sourcePreviewReady
+    ?'✅ First ORIGINAL video frame extracted. '+(j.extractedFrames||1)+' frames decoded so far. Preparing the rest for FREE; first paid replacement preview will unlock automatically when all frames are ready.'
+    :'Decoding the first video frame now; free Render can be slow with high-resolution phone recordings. This is FREE and uses no OpenAI or PiAPI credits.')
   : j.status==='preview_ready'?'First replacement picture is ready. Check it carefully; only then approve the three-frame motion test.'
   : j.status==='sample_ready'?'Four-frame VIDEO sample is ready. Play it and check for character mixing BEFORE paying for the remaining frames.'
   : j.status==='running'?'Creating a short silent video as frames finish. Press Stop after current task if character mixing appears.'
   : j.status==='completed'?'Final video is ready, including the original soundtrack. Download it below.'
-  : j.status==='failed'||j.status==='interrupted'?'Video swap stopped: '+(j.error||j.stage||'Open detailed job information below.') 
+  : j.status==='failed'||j.status==='interrupted'?'Video processing stopped: '+(j.error||j.stage||'Open detailed job information below.')+(j.paidSubmissions===0?' No image edits charged. Try preparing at 8 FPS or a smaller-resolution MP4.':'') 
   : j.stage||j.status;
  $('vsNextHelp').textContent=nextStep;
+ const showExtractPreview=j.status==='preparing'&&!!j.sourcePreviewReady;
+ $('vsFirstSourcePanel').classList.toggle('hide',!showExtractPreview);
+ if(showExtractPreview&&$('vsFirstSourceImage').dataset.job!==j.id){
+  $('vsFirstSourceImage').src='/api/video-swap/'+encodeURIComponent(j.id)+'/source-first';
+  $('vsFirstSourceImage').dataset.job=j.id;
+ }
  $('vsJumpMask').classList.toggle('hide',!waitingForMask&&!readyMasked);
  $('vsJumpMask').textContent=waitingForMask?'2. Mark original person for removal (FREE) ↓':'Edit the saved removal area (FREE) ↓';
  if(j.status==='failed'||j.status==='interrupted')$('vsJobDetails').open=true;
