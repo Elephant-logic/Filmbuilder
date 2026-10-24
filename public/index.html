@@ -568,6 +568,7 @@ function renderVideoSwapJob(j){
  else status+='\nPricing is variable per image edit, including input-image charges. No reliable total or upper bound is available before billing.';
  status+='\nPay-as-you-go safety: motion test stops after first '+Math.min(4,j.frames||4)+' frames; full run needs separate approval.';
  if(j.maskedReplace)status+='\nOriginal person deletion: '+(j.eraseRegion?'MASKED edit zone SAVED':'Requires selecting a removal zone before preview')+'.';
+ if(j.previewFrames>=2)status+='\nSilent playable MP4 currently contains '+j.previewFrames+' video frames. Original audio is added to the final video.';
  if(j.error)status+='\nERROR: '+j.error;
  $('vsJob').textContent=status;
  const showRegion=!!j.maskedReplace&&j.status==='ready';
@@ -613,7 +614,7 @@ function renderVideoSwapJob(j){
  $('vsContinue').textContent=sampleLeft>0
   ?'3. Test '+sampleLeft+' more PAID frames · then WATCH motion'
   :'4. I reviewed the video · approve '+(j.frames-progress)+' remaining PAID frames';
- if(showClip)status+='\nPlayable silent video: '+j.previewFrames+' frames joined. Original audio added only in final MP4.';
+
 }
 async function videoSwapStatus(){
  const id=state.videoSwapId;
