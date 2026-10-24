@@ -28,7 +28,7 @@
  <p class="fine" id="frameMaskStatus" aria-live="polite">Upload the original frame first.</p>
 </div><div class="duo"><div class="field"><label>Aspect ratio</label><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option><option>3:4</option><option>adaptive</option></select></div><div class="field"><label>Resolution</label><select id="resolution"><option>720p</option><option>1080p</option><option>480p</option><option>1K</option><option>2K</option><option>3K</option><option>4K</option></select></div></div><div class="duo"><div class="field"><label>Duration (seconds)</label><input id="duration" type="number" min="3" max="30" value="5"></div><div class="field"><label>Operation</label><select id="action"><option value="create">Create</option><option value="edit">Edit existing video</option><option value="extend">Extend video</option></select></div></div><label style="display:block;margin:6px 0 14px"><input type="checkbox" id="audio"> <span id="audioLabel">Request generated audio (supported models)</span></label><div class="field hide" id="customWrap"><label>Full custom PiAPI Unified task JSON</label><textarea id="custom" rows="7" spellcheck="false">{"model":"seedance","task_type":"seedance-2.5","input":{"prompt":"Describe your video here","duration":5,"resolution":"720p","aspect_ratio":"16:9"}}</textarea><div class="fine">Advanced: follow the chosen model's PiAPI documentation. Custom mode does not automatically inject reference URLs.</div></div><button class="primary" style="width:100%" id="generate">▶ Generate with PiAPI</button><div class="fine warning">Costs real PiAPI credits. Check model settings before confirmation.</div></div>
 <div class="group" id="videoSwapBox"><h3>Video Character Swap · Frame-by-frame (Experimental)</h3>
- <p class="fine">Upload your original MP4/MOV and replacement character with the upload box above. This uses GPT Image to edit each sampled video frame, uses the previous edited frame as a guide, rebuilds an MP4 and keeps the original sound. The FIRST FRAME preview costs a single paid image edit from your selected API account; remaining frames require separate approval. No automatic mask tracking or scene-cut detection yet.</p>
+ <p class="fine">Upload your original MP4/MOV and replacement character with the upload box above. This replaces the original person using GPT Image, keeps the locked first edited frame as the identity master, rebuilds an MP4 and retains the original sound. Select a removal region to mask the old face and clothes out of every edit. The FIRST FRAME preview costs a single paid image edit from your selected API account; remaining frames require separate approval. No automatic mask tracking or scene-cut detection yet.</p>
  <div class="field"><label>Original source video</label><select id="vsVideo"></select></div>
  <div class="field"><label>Replacement character image</label><select id="vsCharacter"></select></div>
  <div class="field"><label>Which API pays for the video edits?</label><select id="vsProvider"><option value="openai" selected>OpenAI Direct · uses OpenAI API billing</option><option value="piapi">PiAPI · uses PiAPI credits</option></select>
@@ -43,10 +43,24 @@
  </div>
  <label style="display:block;margin:7px 0"><input id="vsSound" type="checkbox" checked> Keep sound from original video</label>
  <p class="fine" style="margin:8px 0"><strong>Locked first-frame anchor — always ON.</strong> After you approve the first replacement frame, Filmbuilder saves it as the fixed reference for the character's face, hair and clothing in every later edit. Each new original video frame controls the pose and movement.</p>
+ <label style="display:block;margin:7px 0"><input id="vsMasked" type="checkbox" checked> <strong>Remove & Replace (masked) — recommended.</strong> Mark the original person before paying. This applies a transparent edit mask to the person in each source frame; unselected areas are not the intended edit target.</label>
  <label style="display:block;margin:7px 0"><input id="vsGuide" type="checkbox"> Also use previous edited frame as a secondary continuity guide (4 images per edit from frame 3)</label>
  <p class="fine warning">Maximum 10-second source, 300 edited frames. Original portrait/landscape orientation is preserved. 24 fps is the default for smoother motion, 30 fps can match phone footage. Higher FPS sends MANY more paid image edits and could increase character flicker. A permanent first-frame anchor adds another image reference and can increase input-token charges on either API. Both APIs bill each image edit individually; Direct uses OpenAI billing rather than PiAPI credits. GPT token charges and input-image costs vary. Your free Render service or uploads can restart/expire, interrupting long jobs. There is NO automatic paid retry.</p>
  <button id="vsPrepare" type="button" class="primary" style="width:100%">1. Prepare video frames (FREE)</button>
  <div id="vsJob" class="field" style="margin-top:12px" role="status" aria-live="polite">Upload a video and character image to start.</div>
+ <div id="vsMaskPanel" class="hide" style="padding:12px;border:1px solid #586b89;border-radius:10px;margin-top:10px">
+  <strong>FREE: mark the whole old person to REMOVE</strong>
+  <p class="fine">Draw a rectangle covering the original actor's face, hair, jacket, hands and body — with room for movement. Check the FIRST, MIDDLE and LAST frames. One fixed region is used for the entire clip; this is NOT automatic tracking. If the actor moves outside the rectangle, they may remain. The mask guides AI and cannot guarantee flawless replacement.</p>
+  <label>Inspect original video frame
+   <select id="vsMaskFrame"><option value="source-first">First frame</option><option value="source-middle">Middle frame</option><option value="source-last">Last frame</option></select>
+  </label>
+  <div style="position:relative;margin-top:8px;touch-action:none;overflow:hidden;border-radius:8px" id="vsSourceStage">
+   <img id="vsSourceImage" alt="Original video frame for marking the person to replace" style="display:block;width:100%;height:auto">
+   <canvas id="vsMaskCanvas" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair"></canvas>
+  </div>
+  <p id="vsMaskHelp" class="fine">Drag across the full old person. Then save the mask before buying a frame edit.</p>
+  <button type="button" id="vsSaveRegion" style="width:100%">Save person-removal region (FREE)</button>
+ </div>
  <button id="vsPreview" type="button" class="primary hide" style="width:100%">2. Pay for ONE preview frame</button>
  <img id="vsImage" class="hide" alt="First replacement character video frame" style="width:100%;border-radius:9px;margin-top:9px">
  <button id="vsContinue" type="button" class="primary hide" style="width:100%">3. Approve remaining frames (PAID)</button>
@@ -540,7 +554,7 @@ async function uploads(files){
   }
  }
 }
-let videoSwapCurrent=null,videoSwapBusy=false;
+let videoSwapCurrent=null,videoSwapBusy=false,vsRegionDraft=null,vsMaskJobId=null,vsDrawingStart=null;
 const vsTerminal=new Set(['completed','failed','cancelled','interrupted']);
 function renderVideoSwapJob(j){
  videoSwapCurrent=j;
@@ -550,9 +564,22 @@ function renderVideoSwapJob(j){
  status+='\nLater frames use original frame + character reference + locked first frame'+(j.continuity===false?' (previous-frame guide disabled).':'+ previous edited frame when distinct.');
  if(j.minOutputOnly!=null)status+='\nOutput-image price illustration (LOW GPT 1.5 only): about $'+j.minOutputOnly.toFixed(3)+' across '+j.frames+' frames PLUS all input-image token charges. ACTUAL total is not capped by this figure.';
  else status+='\nPricing is variable per image edit, including input-image charges. No reliable total or upper bound is available before billing.';
+ if(j.maskedReplace)status+='\nOriginal person deletion: '+(j.eraseRegion?'MASKED edit zone SAVED':'Requires selecting a removal zone before preview')+'.';
  if(j.error)status+='\nERROR: '+j.error;
  $('vsJob').textContent=status;
+ const showRegion=!!j.maskedReplace&&j.status==='ready';
+ $('vsMaskPanel').classList.toggle('hide',!showRegion);
+ if(showRegion&&vsMaskJobId!==j.id){
+  vsMaskJobId=j.id;vsRegionDraft=j.eraseRegion||null;
+  $('vsMaskFrame').value='source-first';
+  vsLoadSourceFrame();
+ }
+ if(showRegion&&j.eraseRegion&&!vsRegionDraft){vsRegionDraft=j.eraseRegion;vsDrawMask();}
+ if(showRegion)$('vsMaskHelp').textContent=j.eraseRegion
+  ?'Person-removal zone saved. It will be sent as a native mask on every edit. To change it, draw and save another region BEFORE paying.'
+  :'Draw a generous box over the WHOLE old actor across the clip. Save before paying.';
  $('vsPreview').classList.toggle('hide',j.status!=='ready');
+ $('vsPreview').disabled=showRegion&&!j.eraseRegion;
  $('vsContinue').classList.toggle('hide',!(j.status==='preview_ready'||((j.status==='failed'||j.status==='interrupted')&&progress>0)));
  $('vsCancel').classList.toggle('hide',!['previewing','running'].includes(j.status));
  $('vsImage').classList.toggle('hide',!j.preview);
@@ -578,7 +605,7 @@ async function videoSwapPrepare(){
   const r=await api('/api/video-swap/prepare',{
    videoId,characterId,imageProvider:$('vsProvider').value,model:$('vsModel').value,quality:$('vsQuality').value,
    fps:Number($('vsFps').value),prompt:$('vsPrompt').value,
-   preserveAudio:$('vsSound').checked,continuity:$('vsGuide').checked
+   preserveAudio:$('vsSound').checked,continuity:$('vsGuide').checked,maskedReplace:$('vsMasked').checked
   });
   state.videoSwapId=r.id;save();renderVideoSwapJob(r);
  }catch(e){alert('Video preparation failed: '+e.message);}
@@ -586,8 +613,9 @@ async function videoSwapPrepare(){
 }
 async function videoSwapPreview(){
  if(videoSwapBusy||!videoSwapCurrent||videoSwapCurrent.status!=='ready')return;
+ if(videoSwapCurrent.maskedReplace&&!videoSwapCurrent.eraseRegion){alert('First mark and SAVE the full old person removal area. This free step avoids wasting API credits.');return;}
  const j=videoSwapCurrent;
- if(!confirm('Submit exactly ONE paid GPT Image edit using '+((j.imageProvider||'piapi')==='openai'?'your OpenAI API billing account':'PiAPI credits')+'? The resulting first frame will become the permanent locked character guide. Check it carefully before approving the remaining edits. Image and text tokens cost money.'))return;
+ if(!confirm('Submit exactly ONE paid GPT Image edit using '+((j.imageProvider||'piapi')==='openai'?'your OpenAI API billing account':'PiAPI credits')+'? The resulting first frame will become the permanent locked character guide. In masked mode, GPT is guided to replace the ENTIRE old person in the selected area, although AI may still make mistakes. Check it carefully before approving the remaining edits. Image and text tokens cost money.'))return;
  videoSwapBusy=true;
  try{renderVideoSwapJob(await api('/api/video-swap/preview',{id:j.id}));}
  catch(e){alert('First-frame preview failed: '+e.message);}
@@ -605,6 +633,56 @@ async function videoSwapContinue(){
  catch(e){alert('Video processing could not start: '+e.message);}
  finally{videoSwapBusy=false;}
 }
+function vsLoadSourceFrame(){
+ const j=videoSwapCurrent;
+ if(!j||!j.maskedReplace||j.status!=='ready')return;
+ const img=$('vsSourceImage');
+ img.onload=()=>{
+  const c=$('vsMaskCanvas');c.width=img.naturalWidth;c.height=img.naturalHeight;vsDrawMask();
+ };
+ img.src='/api/video-swap/'+encodeURIComponent(j.id)+'/'+$('vsMaskFrame').value+'?v='+Date.now();
+}
+function vsDrawMask(){
+ const c=$('vsMaskCanvas'),ctx=c.getContext('2d');
+ ctx.clearRect(0,0,c.width,c.height);
+ if(!vsRegionDraft)return;
+ const r=vsRegionDraft;
+ ctx.fillStyle='rgba(225,32,53,0.3)';
+ ctx.strokeStyle='#f72e4f';ctx.lineWidth=Math.max(2,c.width/250);
+ ctx.fillRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height);
+ ctx.strokeRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height);
+}
+function vsPoint(e){
+ const b=$('vsMaskCanvas').getBoundingClientRect();
+ return {x:Math.min(1,Math.max(0,(e.clientX-b.left)/b.width)),
+         y:Math.min(1,Math.max(0,(e.clientY-b.top)/b.height))};
+}
+$('vsMaskFrame').onchange=vsLoadSourceFrame;
+$('vsMaskCanvas').onpointerdown=e=>{
+ if(!videoSwapCurrent||videoSwapCurrent.status!=='ready'||!videoSwapCurrent.maskedReplace)return;
+ e.preventDefault();vsDrawingStart=vsPoint(e);
+ $('vsMaskCanvas').setPointerCapture(e.pointerId);
+};
+$('vsMaskCanvas').onpointermove=e=>{
+ if(!vsDrawingStart)return;
+ const p=vsPoint(e);
+ vsRegionDraft={x:Math.min(p.x,vsDrawingStart.x),y:Math.min(p.y,vsDrawingStart.y),
+  w:Math.abs(p.x-vsDrawingStart.x),h:Math.abs(p.y-vsDrawingStart.y)};
+ vsDrawMask();
+};
+$('vsMaskCanvas').onpointerup=e=>{
+ if(!vsDrawingStart)return;
+ $('vsMaskCanvas').onpointermove(e);vsDrawingStart=null;
+};
+$('vsMaskCanvas').onpointercancel=()=>{vsDrawingStart=null;};
+$('vsSaveRegion').onclick=async()=>{
+ if(!videoSwapCurrent||!videoSwapCurrent.maskedReplace||videoSwapCurrent.status!=='ready'||!vsRegionDraft)return;
+ try{
+  const updated=await api('/api/video-swap/region',{id:videoSwapCurrent.id,region:vsRegionDraft});
+  renderVideoSwapJob(updated);
+  alert('Person-removal area saved for the entire video. Inspect the first, middle and last original frames to ensure the rectangle covers all movements BEFORE buying a preview.');
+ }catch(e){alert('Could not save person-removal area: '+e.message);}
+};
 $('vsProvider').onchange=()=>{
  $('vsProviderHint').textContent=$('vsProvider').value==='openai'
   ?'OpenAI Direct: image edits bill your OpenAI API account (uses OPENAI_API_KEY on Render), not PiAPI credits. ChatGPT Plus does not include API credits.'

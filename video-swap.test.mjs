@@ -4,12 +4,18 @@ import path from 'node:path';
 import {mkdtemp,readFile,writeFile,mkdir,stat,rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController} from './video-swap.mjs';
+import {MAX_VIDEO_FRAMES,videoSwapSettings,videoFramePrompt,frameOutputSize,minimumOutputEstimate,createVideoSwapController,nativePersonMask,validEraseRegion} from './video-swap.mjs';
+import {PNG} from 'pngjs';
 
 const require=createRequire(import.meta.url);
 assert.equal(MAX_VIDEO_FRAMES,300);
 assert.equal(videoSwapSettings({}).fps,24,'24 fps is the smooth default');
 assert.equal(videoSwapSettings({}).imageProvider,'piapi','Legacy requests remain PiAPI');
+assert.equal(videoSwapSettings({maskedReplace:true}).maskedReplace,true);
+assert.equal(videoSwapSettings({}).maskedReplace,false,'Old saved jobs remain backward compatible');
+assert.throws(()=>validEraseRegion({x:0.8,y:0.1,w:0.6,h:0.8}),/outside/);
+assert.throws(()=>validEraseRegion({x:0.1,y:0.1,w:0.01,h:0.8}),/too small/);
+assert.match(videoFramePrompt(2,'',false,true),/native transparent PERSON REMOVAL MASK/);
 assert.equal(videoSwapSettings({imageProvider:'openai'}).imageProvider,'openai');
 assert.throws(()=>videoSwapSettings({imageProvider:'unknown'}),/PiAPI or OpenAI Direct/);
 assert.equal(videoSwapSettings({fps:30}).fps,30,'30 fps phone video setting');
@@ -223,5 +229,53 @@ try{
  await assert.rejects(()=>noKey.preview(missingPrep.id),/API key is not configured/);
  assert.equal((await noKey.status(missingPrep.id)).paidSubmissions,0);
  console.log('Provider key preflight prevents unconfigured paid edits');
+ // Strict full-person erase selection: no money can be spent without a saved
+ // region, and provider receives a matching transparent PNG mask on Image 1.
+ const maskCalls=[];
+ const maskedController=createVideoSwapController({storage:root,piapiKey:'',openaiKey:'fake-openai-key',
+  provider:async(url,opts)=>{
+   assert.equal(url,'https://api.openai.com/v1/images/edits');
+   const maskFile=opts.body.get('mask');
+   assert.ok(maskFile,'Strict replacement must attach a native mask to each edit');
+   const input=Buffer.from(await opts.body.getAll('image[]')[0].arrayBuffer());
+   const mask=PNG.sync.read(Buffer.from(await maskFile.arrayBuffer()));
+   const current=PNG.sync.read(input);
+   assert.equal(mask.width,current.width);
+   assert.equal(mask.height,current.height);
+   assert.equal(mask.data[(1*mask.width+1)*4+3],255,'Scene background kept fully opaque');
+   const mid=(Math.floor(mask.height*0.5)*mask.width+Math.floor(mask.width*0.5))*4+3;
+   assert.equal(mask.data[mid],0,'Old actor location made transparent for replacement');
+   maskCalls.push({images:opts.body.getAll('image[]').length,mask});
+   return {data:[{b64_json:exampleFrame.toString('base64')}]};
+  },
+  asset:async id=>{
+   if(id===vid)return {id:vid,mime:'video/mp4',size:(await stat(source)).size,duration:1,width:320,height:180};
+   if(id===img)return {id:img,mime:'image/png',size:exampleFrame.length,name:'character.png',bytes:exampleFrame};
+   throw Error('Unknown masked test asset');
+  }});
+ const maskStarted=await maskedController.prepare({videoId:vid,characterId:img,imageProvider:'openai',fps:8,maskedReplace:true,continuity:false});
+ const maskReady=await waitFor(maskedController,maskStarted.id,['ready','failed']);
+ assert.equal(maskReady.status,'ready',maskReady.error);
+ await assert.rejects(()=>maskedController.preview(maskStarted.id),/Draw and save/,'Cannot spend without person erase zone');
+ assert.equal((await maskedController.status(maskStarted.id)).paidSubmissions,0,'No wasted credits');
+ const region={x:0.2,y:0.1,w:0.6,h:0.8};
+ const regionSaved=await maskedController.setEraseRegion(maskStarted.id,region);
+ assert.deepEqual(regionSaved.eraseRegion,region);
+ assert.equal(regionSaved.paidSubmissions,0,'Saving the person removal mask is free');
+ const sample=await readFile(path.join(root,'video-swap-'+maskStarted.id,'frames','000001.png'));
+ const maskFromHelper=PNG.sync.read(nativePersonMask(sample,region));
+ assert.equal(maskFromHelper.data[(1*maskFromHelper.width+1)*4+3],255);
+ await maskedController.preview(maskStarted.id);
+ assert.equal((await waitFor(maskedController,maskStarted.id,['preview_ready','failed'])).status,'preview_ready');
+ assert.equal(maskCalls.length,1);
+ await assert.rejects(()=>maskedController.setEraseRegion(maskStarted.id,region),/before the first paid edit/,'Cannot silently change area mid-job');
+ await maskedController.continueJob(maskStarted.id);
+ const maskedFinal=await waitFor(maskedController,maskStarted.id,['completed','failed'],30000);
+ assert.equal(maskedFinal.status,'completed',maskedFinal.error);
+ assert.equal(maskCalls.length,8,'One native mask for every original video frame, no extra paid passes');
+ assert.equal(maskCalls[1].images,3,'Direct strict economy mode still has 3 reference images');
+ assert.equal(maskedFinal.paidSubmissions,8);
+ console.log('Strict Remove & Replace: native alpha mask per frame, approval gate, complete actor-zone selection and zero unpaid requests passed');
+
 
 }finally{await rm(root,{recursive:true,force:true});}
