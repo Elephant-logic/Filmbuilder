@@ -2,7 +2,7 @@
 // No paid API call occurs during preparation. The first paid preview and the
 // remaining paid frames require separate explicit user requests.
 import path from 'node:path';
-import {mkdir,readFile,writeFile,readdir,stat,open} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,readdir,stat,open,rename} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
@@ -96,6 +96,8 @@ function receipt(job){
   completedFrames:job.completedFrames||0,paidSubmissions:job.paidSubmissions||0,
   anchorLocked:!!job.anchorLocked,continuity:job.continuity!==false,
   maskedReplace:!!job.maskedReplace,eraseRegion:job.eraseRegion||null,
+  previewFrames:job.previewFrames||0,progressVideo:job.previewFrames>=2?'/api/video-swap/'+job.id+'/progress?frames='+job.previewFrames:null,
+  motionSampleTarget:Math.min(4,job.frames||4),
   minOutputOnly:job.minOutputOnly,stage:job.stage||'',sourceHadAudio:job.preserveAudio,
   preview:job.completedFrames>=1?'/api/video-swap/'+job.id+'/preview':null,
   video:job.status==='completed'?'/api/video-swap/'+job.id+'/download':null};
@@ -206,6 +208,21 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   job.currentTask=null;job.completedFrames=index;await save(job);
  }
 
+ async function updateRollingPreview(job){
+  // Re-encode a playable, silent snapshot immediately after EACH paid frame.
+  // The temporary MP4 is written separately, then atomically swapped so a
+  // browser never receives a half-encoded video. No extra image API calls.
+  if(job.completedFrames<2)return;
+  const dir=folder(job.id);
+  const output=path.join(dir,'progress-new.mp4'),target=path.join(dir,'progress.mp4');
+  await runFFmpeg(['-framerate',String(job.fps),'-start_number','1',
+   '-i',path.join(dir,'edited','%06d.png'),'-frames:v',String(job.completedFrames),
+   '-vf','scale='+job.outputWidth+':'+job.outputHeight+':force_original_aspect_ratio=increase,crop='+job.outputWidth+':'+job.outputHeight,
+   '-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-an',
+   '-movflags','+faststart',output],120000);
+  await rename(output,target);
+  job.previewFrames=job.completedFrames;await save(job);
+ }
  async function prepare(input){
   if(active)throw Error('Another video swap is already processing; finish or cancel it first');
   const opts=videoSwapSettings(input);
@@ -265,18 +282,25 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   if(job.maskedReplace&&!job.eraseRegion)throw Error('Draw and save a person-removal area before spending credits. It must cover the old actor throughout the clip.');
   active=id;await setStatus(job,'previewing','Editing frame 1 · paid PiAPI request');
   void (async()=>{try{
-   await submitOne(job,1);await setStatus(job,'preview_ready','Review frame 1, then explicitly approve the remaining '+(job.frames-1)+' edits');
+   await submitOne(job,1);await setStatus(job,'preview_ready','Approve up to 3 more PAID frames to watch a short motion sample before any full-video run');
   }catch(e){job.error=e.message;await setStatus(job,'failed','Preview stopped. No automatic paid retry.');}
   finally{if(active===id)active=null;}})();
   return receipt(job);
  }
- async function continueJob(id){
+ async function continueJob(id,phase='sample'){
   const job=await safeJob(id);
   if(active)throw Error('Another video-swap operation is in progress');
   if((job.imageProvider||'piapi')==='openai'?!openaiKey:!piapiKey)throw Error('Selected image provider API key is not configured in Render');
-  if(!['preview_ready','interrupted','failed'].includes(job.status)||!job.completedFrames)throw Error('Approve the first-frame preview before processing more frames');
+  if(!['preview_ready','sample_ready','interrupted','failed'].includes(job.status)||!job.completedFrames)throw Error('Approve the first-frame preview before processing more frames');
+  const sampleTarget=Math.min(4,job.frames);
+  if(!['sample','full'].includes(phase))throw Error('Choose a motion sample or full continuation');
+  if(phase==='full'&&(job.completedFrames<sampleTarget||!['sample_ready','failed','interrupted'].includes(job.status)))
+   throw Error('Watch the 4-frame motion sample and approve it before authorising the full paid video');
+  if(phase==='sample'&&job.completedFrames>=sampleTarget&&job.frames>sampleTarget)
+   throw Error('Motion sample completed; watch the video and explicitly approve the remainder');
+  const lastFrame=phase==='sample'?sampleTarget:job.frames;
   if(job.maskedReplace&&!job.eraseRegion)throw Error('The original person-removal region is missing: no paid edits permitted');
-  if(job.currentTask)throw Error('A previous PiAPI task may still be running or billed ('+job.currentTask+'). Check its status in PiAPI before resuming.');
+  if(job.currentTask)throw Error('A previous '+(job.imageProvider==='openai'?'OpenAI Direct':'PiAPI')+' edit may have been billed ('+job.currentTask+'). Check provider usage before resuming.');
   if(job.completedFrames>=job.frames)throw Error('All frames already processed');
   // Migrate in-progress jobs from before the fixed anchor was introduced.
   // This is local filesystem work only and cannot spend PiAPI credits.
@@ -290,10 +314,15 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
   job.anchorLocked=true;await save(job);
   job.stop=false;job.error='';active=id;await setStatus(job,'running','Processing frame '+(job.completedFrames+1)+' of '+job.frames);
   void (async()=>{try{
-   for(let i=job.completedFrames+1;i<=job.frames;i++){
+   for(let i=job.completedFrames+1;i<=lastFrame;i++){
     if(job.stop)throw Error('Cancelled by user');
     job.stage='Processing frame '+i+' of '+job.frames;await save(job);
     await submitOne(job,i);
+    await updateRollingPreview(job);
+   }
+   if(phase==='sample'&&job.completedFrames<job.frames){
+    await setStatus(job,'sample_ready','Watch the silent motion-preview video. Only approve the remaining paid frames if the character looks right.');
+    return;
    }
    await setStatus(job,'rendering','Rebuilding MP4 and restoring the original audio');
    const dir=folder(job.id),source=path.join(storage,job.videoId+'.bin');
@@ -311,7 +340,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
  }
  async function cancel(id){
   const job=await safeJob(id);
-  job.stop=true;job.stage='Cancellation requested · current PiAPI task may still cost credits';
+  job.stop=true;job.stage='Cancellation requested · an in-flight image edit may still cost credits';
   await save(job);return receipt(job);
  }
  async function status(id){return receipt(await safeJob(id));}
@@ -326,8 +355,9 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
    res.writeHead(200,{'Content-Type':'image/png','Content-Length':info.size,'Cache-Control':'private,no-store'});
    return createReadStream(file).pipe(res);
   }
+  if(kind==='progress'&&(!job.previewFrames||job.previewFrames<2))throw Error('Need two completed frames for a playable video preview');
   if(kind==='download'&&job.status!=='completed')throw Error('Final MP4 not ready');
-  const file=kind==='preview'?path.join(folder(id),'edited','000001.png'):path.join(folder(id),'result.mp4');
+  const file=kind==='preview'?path.join(folder(id),'edited','000001.png'):path.join(folder(id),kind==='progress'?'progress.mp4':'result.mp4');
   const info=await stat(file);
   res.writeHead(200,{'Content-Type':kind==='preview'?'image/png':'video/mp4','Content-Length':info.size,
    'Content-Disposition':kind==='download'?'attachment; filename="filmbuilder-character-swap.mp4"':'inline','Cache-Control':'private,no-store','Accept-Ranges':'none'});
