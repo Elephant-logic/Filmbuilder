@@ -208,7 +208,7 @@ export function createVideoSwapController({storage,asset,piapiKey,openaiKey='',p
     const scale=Math.min(2,1280/Math.max(width,height));
     job.outputWidth=Math.max(2,Math.round(width*scale/2)*2);
     job.outputHeight=Math.max(2,Math.round(height*scale/2)*2);
-    job.minOutputOnly=minimumOutputEstimate(files.length,width,height,opts.quality,opts.model);
+    job.minOutputOnly=opts.imageProvider==='piapi'?minimumOutputEstimate(files.length,width,height,opts.quality,opts.model):null;
     await setStatus(job,'ready','Prepared '+job.frames+' frames · no PiAPI charge');
    }catch(e){job.error=e.message;await setStatus(job,'failed','Video preparation failed · no credits spent');}
    finally{if(active===id)active=null;}
